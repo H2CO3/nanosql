@@ -1,0 +1,22 @@
+# Cargo build directory
+/target
+nanosql/target
+nanosql_macros/target
+nanosql-macros/target
+nanosql_derive/target
+nanosql-derive/target
+/Cargo.lock
+nanosql/Cargo.lock
+nanosql_macros/Cargo.lock
+nanosql-macros/Cargo.lock
+nanosql_derive/Cargo.lock
+nanosql-derive/Cargo.lock
+
+# Vim
+**/*.swp
+**/*.swo
+**/*.swn
+**/*.swm
+
+# macOS
+**/.DS_Store

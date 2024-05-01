@@ -1,0 +1,12 @@
+[package]
+name = "nanosql"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rusqlite = "0.31.0"
+thiserror = "1.0.59"
+serde = "1.0.199"
+
+[dev-dependencies]
+serde = { version = "1.0.199", features = ["derive"] }
