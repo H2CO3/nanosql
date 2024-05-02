@@ -27,14 +27,14 @@ and can be called for convenience.
 The absolute basics - create a table, insert a bunch of records into it, then retrieve them:
 
 ```rust
-use nanosql::serde::{Serialize, Deserialize};
-use nanosql::{Result, Connection, ConnectionExt, Query, ParamPrefix, Table, TableDesc, Column};
+use nanosql::{
+    Error, Result, Statement, Connection, ConnectionExt, Query,
+    Param, ParamPrefix, Row, ResultRecord, Table, TableDesc, Column,
+};
 
 
 /// This type is going to represent our table.
-/// We derive `serde::{Serialize, Deserialize}` so that
-/// it can be used as a bound parameter to a query as well as a return value.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct Pet {
     id: i64,
     name: String,
@@ -57,12 +57,65 @@ impl Table for Pet {
     };
 }
 
+/// We implement the `Param` trait for our record type so that it can be used for
+/// binding parameters to the statement when inserting new records.
+impl Param for Pet {
+    /// We need to specify the leading symbol in front of the parameter names.
+    /// NanoSQL encourages the use of named parameters, so the default choice
+    /// should be the dollar (`$`) sign (`ParamPrefix::Dollar`). This must in
+    /// turn match the parameter names in the implementation of `Param::bind`.
+    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Dollar;
+
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        let expected = statement.parameter_count();
+        let actual = 3;
+
+        if actual != expected {
+            return Err(Error::ParamCountMismatch { expected, actual });
+        }
+
+        let index = statement.parameter_index("$id")?.ok_or(Error::unknown_param("$id"))?;
+        statement.raw_bind_parameter(index, &self.id)?;
+
+        let index = statement.parameter_index("$name")?.ok_or(Error::unknown_param("$name"))?;
+        statement.raw_bind_parameter(index, &self.name)?;
+
+        let index = statement.parameter_index("$kind")?.ok_or(Error::unknown_param("$name"))?;
+        statement.raw_bind_parameter(index, &self.kind)?;
+
+        Ok(())
+    }
+}
+
+impl ResultRecord for Pet {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        let expected = 3;
+        let actual = row.as_ref().column_count();
+
+        if actual != expected {
+            return Err(Error::ColumnCountMismatch { expected, actual });
+        }
+
+        Ok(Pet {
+            id: row.get("id")?,
+            name: row.get("name")?,
+            kind: row.get("kind")?,
+        })
+    }
+}
+
 /// Our first custom query retrieves a pet by its unique ID.
 struct PetById;
 
 impl Query for PetById {
     /// The type of the parameter(s). This can be a single scalar, a tuple,
     /// a tuple struct, or a struct with named fields.
+    ///
+    /// By default, scalars, tuples, and tuple structs use `?` because they
+    /// are fundamentally positional parameters. The derive macro for structs
+    /// with named fields uses `$` by default, since `?` doesn't allow named
+    /// parameters, and among the three other prefixes that do (`$`, `:`, and
+    /// `@`), the most flexible one is `$`.
     type Input<'p> = i64;
 
     /// The return type of a query can be either a scalar, a single record (struct or
@@ -70,12 +123,6 @@ impl Query for PetById {
     /// or a collection of arbitrarily many scalars/records. Here we choose an `Option`,
     /// because a given ID corresponds to at most one `Pet`.
     type Output = Option<Pet>;
-
-    /// We need to specify the leading symbol in front of the parameter names.
-    /// NanoSQL encourages the use of named parameters, so the default value of this
-    /// associated const is the dollar (`$`) sign (`ParamPrefix::Dollar`). Here we
-    /// only need a single, scalar parameter, so we just use a question mark.
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
 
     /// Finally, we create the actual SQL query.
     fn sql(&self) -> Result<impl AsRef<str> + '_> {

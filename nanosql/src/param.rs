@@ -1,20 +1,23 @@
 //! Serializing strongly-typed arguments as bound statement parameters.
 
-use core::mem;
-use core::num::NonZeroUsize;
-use core::fmt::{self, Display, Formatter, Write};
-use serde::ser::{
-    Serialize,
-    Serializer,
-    SerializeSeq,
-    SerializeTuple,
-    SerializeTupleStruct,
-    SerializeTupleVariant,
-    SerializeMap,
-    SerializeStruct,
-    SerializeStructVariant,
+use core::num::{
+    NonZeroI8,
+    NonZeroU8,
+    NonZeroI16,
+    NonZeroU16,
+    NonZeroI32,
+    NonZeroU32,
+    NonZeroI64,
+    NonZeroU64,
+    NonZeroIsize,
+    NonZeroUsize,
 };
-use rusqlite::{Statement, ToSql};
+use core::fmt::{self, Display, Formatter, Write};
+use std::borrow::Cow;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::collections::{HashMap, BTreeMap};
+use rusqlite::{Statement, ToSql, types::{Value, ValueRef, Null, ToSqlOutput}};
 use crate::error::{Error, Result};
 
 
@@ -36,9 +39,20 @@ pub enum ParamPrefix {
 }
 
 impl ParamPrefix {
+    /// Returns the underlying raw byte.
+    pub const fn as_byte(self) -> u8 {
+        self as u8
+    }
+
     /// Returns the underlying raw character.
     pub const fn as_char(self) -> char {
         self as u8 as char
+    }
+}
+
+impl From<ParamPrefix> for u8 {
+    fn from(prefix: ParamPrefix) -> Self {
+        prefix.as_byte()
     }
 }
 
@@ -48,404 +62,315 @@ impl From<ParamPrefix> for char {
     }
 }
 
+impl TryFrom<char> for ParamPrefix {
+    type Error = Error;
+
+    fn try_from(ch: char) -> Result<Self, Self::Error> {
+        match ch {
+            '$' => Ok(ParamPrefix::Dollar),
+            ':' => Ok(ParamPrefix::Colon),
+            '?' => Ok(ParamPrefix::Question),
+            '@' => Ok(ParamPrefix::At),
+            _   => Err(Error::message(format_args!("invalid parameter prefix: `{ch}`"))),
+        }
+    }
+}
+
+impl TryFrom<u8> for ParamPrefix {
+    type Error = Error;
+
+    fn try_from(byte: u8) -> Result<Self, Self::Error> {
+        char::from(byte).try_into()
+    }
+}
+
 impl Display for ParamPrefix {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_char(self.as_char())
     }
 }
 
-/// A serializer that binds named (struct) or ordered (tuple) parameters
-/// to a prepared statement.
-#[derive(Debug)]
-pub struct ParamSerializer<'a, 'b> {
-    next_param_index: Option<NonZeroUsize>,
-    bound_param_count: usize,
-    statement: &'a mut Statement<'b>,
-    key_buf: &'a mut String,
-    param_prefix: ParamPrefix,
+/// Describes types that can be bound as parameters to a compiled statement.
+///
+/// The kinds of types implementing this trait include:
+///
+/// * Primitives (numeric types, strings, blobs, etc.)
+/// * Optionals of primitives
+/// * Tuples or structs of any of the above
+/// * Singleton/forwarding wrappers of any of the above, e.g. `&T` and `Box`
+pub trait Param {
+    /// The leading symbol in parameter names. (Must be consistent across parameters.)
+    const PARAM_PREFIX: ParamPrefix;
+
+    /// Binds the primitive or the field(s) of a tuple to a raw `rusqlite::Statement`.
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()>;
 }
 
-impl<'a, 'b> ParamSerializer<'a, 'b> {
-    /// Before returning, this clears all bindings on the `statement`,
-    /// so that exactly those parameters that are bound as a result of
-    /// the serialization (i.e., those specified by the current invocation)
-    /// are bound, and leftover parameters don't stick around.
-    pub fn new(
-        statement: &'a mut Statement<'b>,
-        key_buf: &'a mut String,
-        param_prefix: ParamPrefix,
-    ) -> Self {
-        statement.clear_bindings();
+/// Private helper for ensuring that exactly 1 parameter is expected when binding a primitive
+/// as a top-level parameter "list".
+fn bind_primitive<T: ToSql>(statement: &mut Statement<'_>, value: T) -> Result<()> {
+    let expected = statement.parameter_count();
+    let actual = 1;
 
-        ParamSerializer {
-            next_param_index: None,
-            bound_param_count: 0,
-            statement,
-            key_buf,
-            param_prefix,
-        }
-    }
-
-    /// Assigns the value to the parameter at the current index, then advances the index.
-    /// Appropriate for both indexed *and* named parameters. (Indexed parameters are
-    /// bound simply in order; named parameters will always have their index re-set before
-    /// this function is called, so the incremented index will never actually be observed.)
-    fn bind<T: ToSql>(&mut self, value: T) -> Result<()> {
-        // the `unwrap_or(...)` part makes this work for scalar parameters
-        let index = self.next_param_index.unwrap_or(NonZeroUsize::MIN);
-        self.statement.raw_bind_parameter(index.get(), value)?;
-        self.next_param_index = index.checked_add(1); // advance index
-        self.bound_param_count += 1; // only increment bound count if bind succeeded
+    if actual == expected {
+        statement.raw_bind_parameter(1, value)?;
         Ok(())
-    }
-
-    /// Ensures that exactly as many parameters were bound as expected by the statement.
-    pub fn finalize(self) -> Result<()> {
-        let total_param_count = self.statement.parameter_count();
-
-        if self.bound_param_count == total_param_count {
-            Ok(())
-        } else {
-            Err(Error::ParamCountMismatch {
-                expected: total_param_count,
-                actual: self.bound_param_count,
-            })
-        }
+    } else {
+        Err(Error::ParamCountMismatch { expected, actual })
     }
 }
 
-impl<'a, 'b, 'c> Serializer for &'c mut ParamSerializer<'a, 'b> {
-    type Ok = ();
-    type Error = Error;
-    type SerializeSeq = Self;
-    type SerializeTuple = Self;
-    type SerializeTupleStruct = Self;
-    type SerializeTupleVariant = Self;
-    type SerializeMap = Self;
-    type SerializeStruct = Self;
-    type SerializeStructVariant = Self;
+macro_rules! impl_param_for_primitive {
+    ($($ty:ty,)*) => {$(
+        impl Param for $ty {
+            /// Primitives are bound as positional parameters, hence the prefix is '?'
+            const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
 
-    fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-
-    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        self.serialize_f64(v.into())
-    }
-
-    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_char(self, c: char) -> Result<Self::Ok, Self::Error> {
-        let mut buf = [0; 4];
-        let s = c.encode_utf8(&mut buf);
-        self.serialize_str(s)
-    }
-
-    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        self.bind(v)
-    }
-
-    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        self.bind(rusqlite::types::Null)
-    }
-
-    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        value.serialize(self)
-    }
-
-    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        self.serialize_none()
-    }
-
-    fn serialize_unit_struct(self, _name: &str) -> Result<Self::Ok, Self::Error> {
-        self.serialize_unit()
-    }
-
-    fn serialize_unit_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        variant: &'static str,
-    ) -> Result<Self::Ok, Self::Error> {
-        self.serialize_str(variant)
-    }
-
-    fn serialize_newtype_struct<T>(
-        self,
-        _name: &'static str,
-        value: &T
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        value.serialize(self)
-    }
-
-    fn serialize_newtype_variant<T>(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        Err(Error::EnumWithValue)
-    }
-
-    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        if self.next_param_index.replace(NonZeroUsize::MIN).is_none() {
-            Ok(self)
-        } else {
-            Err(Error::NestedParam)
-        }
-    }
-
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        self.serialize_seq(Some(len))
-    }
-
-    fn serialize_tuple_struct(
-        self,
-        _name: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        self.serialize_seq(Some(len))
-    }
-
-    fn serialize_tuple_variant(
-       self,
-       _name: &'static str,
-       _variant_index: u32,
-       _variant: &'static str,
-       _len: usize
-    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Err(Error::EnumWithValue)
-    }
-
-    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        if self.next_param_index.is_none() {
-            Ok(self)
-        } else {
-            Err(Error::NestedParam)
-        }
-    }
-
-    fn serialize_struct(
-        self,
-        _name: &'static str,
-        len: usize
-    ) -> Result<Self::SerializeStruct, Self::Error> {
-        self.serialize_map(Some(len))
-    }
-
-    fn serialize_struct_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        _len: usize
-    ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Err(Error::EnumWithValue)
-    }
-}
-
-impl SerializeSeq for &mut ParamSerializer<'_, '_> {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        value.serialize(&mut **self)
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(())
-    }
-}
-
-impl SerializeTuple for &mut ParamSerializer<'_, '_> {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        SerializeSeq::serialize_element(self, value)
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        SerializeSeq::end(self)
-    }
-}
-
-impl SerializeTupleStruct for &mut ParamSerializer<'_, '_> {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        SerializeSeq::serialize_element(self, value)
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        SerializeSeq::end(self)
-    }
-}
-
-impl SerializeStruct for &mut ParamSerializer<'_, '_> {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_field<T>(
-        &mut self,
-        key: &'static str,
-        value: &T
-    ) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        self.key_buf.clear();
-        write!(self.key_buf, "{}{}", self.param_prefix, key)?;
-        let index = self.statement.parameter_index(self.key_buf.as_str())?;
-        let index = index.ok_or_else(|| Error::UnknownParam(mem::take(self.key_buf)))?;
-        self.next_param_index = NonZeroUsize::new(index);
-        value.serialize(&mut **self)
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(())
-    }
-}
-
-impl SerializeMap for &mut ParamSerializer<'_, '_> {
-    type Ok = ();
-    type Error = Error;
-
-    fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        struct KeyStringifier<T> {
-            prefix: ParamPrefix,
-            key: T,
-        }
-
-        impl<T: Serialize> Display for KeyStringifier<T> {
-            fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-                self.prefix.fmt(formatter)?;
-                self.key.serialize(formatter)
+            fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+                bind_primitive(statement, self)
             }
         }
+    )*}
+}
 
-        // re-use key buffer of query
-        let key_stringifier = KeyStringifier {
-            prefix: self.param_prefix,
-            key,
-        };
-        self.key_buf.clear();
-        write!(self.key_buf, "{}", key_stringifier).map_err(|_| Error::ParamNameNotString)?;
+impl_param_for_primitive!{
+    bool,
+    i8,
+    u8,
+    i16,
+    u16,
+    i32,
+    u32,
+    i64,
+    u64,
+    isize,
+    usize,
+    NonZeroI8,
+    NonZeroU8,
+    NonZeroI16,
+    NonZeroU16,
+    NonZeroI32,
+    NonZeroU32,
+    NonZeroI64,
+    NonZeroU64,
+    NonZeroIsize,
+    NonZeroUsize,
+    f32,
+    f64,
+    str,
+    [u8],
+    String,
+    Vec<u8>,
+    Value,
+    ToSqlOutput<'_>,
+    Null,
+}
 
-        let index = self.statement.parameter_index(self.key_buf.as_str())?;
-        let index = index.ok_or_else(|| Error::UnknownParam(mem::take(self.key_buf)))?;
+impl Param for ValueRef<'_> {
+    /// Primitives are bound as positional parameters, hence the prefix is '?'
+    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
 
-        self.next_param_index = NonZeroUsize::new(index);
-
-        Ok(())
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        bind_primitive(statement, ToSqlOutput::Borrowed(*self))
     }
+}
 
-    fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        value.serialize(&mut **self)
+impl<const N: usize> Param for [u8; N] {
+    /// Primitives are bound as positional parameters, hence the prefix is '?'
+    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        bind_primitive(statement, self)
     }
+}
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
+macro_rules! impl_param_for_tuple {
+    () => {
+        impl Param for () {
+            /// Tuples use positional parameters, hence the prefix is '?'
+            const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+
+            fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+                let expected = statement.parameter_count();
+                let actual = 0;
+
+                if actual == expected {
+                    Ok(())
+                } else {
+                    Err(Error::ParamCountMismatch { expected, actual })
+                }
+            }
+        }
+    };
+    ($head_id:ident => $head_ty:ident; $($rest_id:ident => $rest_ty:ident;)*) => {
+        impl<$head_ty, $($rest_ty,)*> Param for ($head_ty, $($rest_ty,)*)
+        where
+            $head_ty: ToSql,
+            $($rest_ty: ToSql,)*
+        {
+            /// Tuples use positional parameters, hence the prefix is '?'
+            const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+
+            fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+                let ($head_id, $($rest_id,)*) = self;
+
+                #[allow(unused_mut)]
+                let mut index = 1;
+                statement.raw_bind_parameter(index, $head_id)?;
+
+                $(
+                    index += 1;
+                    statement.raw_bind_parameter(index, $rest_id)?;
+                )*
+
+                let expected = statement.parameter_count();
+                let actual = index;
+
+                if actual == expected {
+                    Ok(())
+                } else {
+                    Err(Error::ParamCountMismatch { expected, actual })
+                }
+            }
+        }
+        impl_param_for_tuple!($($rest_id => $rest_ty;)*);
+    };
+}
+
+impl_param_for_tuple!{
+    a => A;
+    b => B;
+    c => C;
+    d => D;
+    e => E;
+    f => F;
+    g => G;
+    h => H;
+    i => I;
+    j => J;
+    k => K;
+    l => L;
+    m => M;
+    n => N;
+    o => O;
+    p => P;
+    q => Q;
+    r => R;
+    s => S;
+    t => T;
+    u => U;
+    v => V;
+    w => W;
+    x => X;
+    y => Y;
+    z => Z;
+}
+
+macro_rules! impl_param_for_wrapper {
+    ($($ty:ty;)*) => {$(
+        impl<T: ?Sized + Param> Param for $ty {
+            const PARAM_PREFIX: ParamPrefix = T::PARAM_PREFIX;
+
+            fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+                let body = |value: &$ty, statement| Param::bind(&**value, statement);
+                body(self, statement)
+            }
+        }
+    )*}
+}
+
+impl_param_for_wrapper! {
+    &T;
+    &mut T;
+    Box<T>;
+    Rc<T>;
+    Arc<T>;
+}
+
+impl<T> Param for Cow<'_, T>
+where
+    T: ?Sized + ToOwned + Param,
+{
+    const PARAM_PREFIX: ParamPrefix = T::PARAM_PREFIX;
+
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        Param::bind(&**self, statement)
+    }
+}
+
+impl<T: ToSql> Param for Option<T> {
+    /// Primitives are bound as positional parameters, hence the prefix is '?'
+    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        bind_primitive(statement, self)
+    }
+}
+
+impl<K, V> Param for HashMap<K, V>
+where
+    K: Display,
+    V: ToSql,
+{
+    /// Dynamic maps use `$` by default because it's the most flexible prefix.
+    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Dollar;
+
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        let expected = statement.parameter_count();
+        let actual = self.len();
+
+        if actual != expected {
+            return Err(Error::ParamCountMismatch { expected, actual });
+        }
+
+        // re-use parameter name construction buffer in order to save allocations
+        let mut name_buf = String::new();
+
+        for (key, value) in self {
+            name_buf.clear();
+            write!(name_buf, "{}{}", Self::PARAM_PREFIX, key)?;
+
+            let index = statement.parameter_index(name_buf.as_str())?.ok_or_else(|| {
+                Error::unknown_param_dyn(&name_buf)
+            })?;
+
+            statement.raw_bind_parameter(index, value)?;
+        }
+
         Ok(())
     }
 }
 
-impl SerializeTupleVariant for &mut ParamSerializer<'_, '_> {
-    type Ok = ();
-    type Error = Error;
+impl<K, V> Param for BTreeMap<K, V>
+where
+    K: Display,
+    V: ToSql,
+{
+    /// Dynamic maps use `$` by default because it's the most flexible prefix.
+    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Dollar;
 
-    fn serialize_field<T>(&mut self, _value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        Err(Error::EnumWithValue)
-    }
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        let expected = statement.parameter_count();
+        let actual = self.len();
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Err(Error::EnumWithValue)
-    }
-}
+        if actual != expected {
+            return Err(Error::ParamCountMismatch { expected, actual });
+        }
 
-impl SerializeStructVariant for &mut ParamSerializer<'_, '_> {
-    type Ok = ();
-    type Error = Error;
+        // re-use parameter name construction buffer in order to save allocations
+        let mut name_buf = String::new();
 
-    fn serialize_field<T>(
-        &mut self,
-        _key: &'static str,
-        _value: &T
-    ) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize
-    {
-        Err(Error::EnumWithValue)
-    }
+        for (key, value) in self {
+            name_buf.clear();
+            write!(name_buf, "{}{}", Self::PARAM_PREFIX, key)?;
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Err(Error::EnumWithValue)
+            let index = statement.parameter_index(name_buf.as_str())?.ok_or_else(|| {
+                Error::unknown_param_dyn(&name_buf)
+            })?;
+
+            statement.raw_bind_parameter(index, value)?;
+        }
+
+        Ok(())
     }
 }

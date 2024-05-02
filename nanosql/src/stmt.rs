@@ -3,17 +3,15 @@
 use core::fmt::{self, Debug, Formatter};
 use core::marker::PhantomData;
 use std::borrow::{Borrow, Cow};
-use serde::{Serialize, Deserialize};
 use rusqlite::CachedStatement;
 use crate::query::Query;
-use crate::param::ParamSerializer;
-use crate::row::RowsDeserializer;
+use crate::param::Param;
+use crate::row::ResultSet;
 use crate::error::Result;
 
 
 /// A compiled/"prepared" statement.
 pub struct CompiledStatement<'conn, Q> {
-    key_buf: String,
     statement: CachedStatement<'conn>,
     marker: PhantomData<fn() -> Q>,
 }
@@ -22,7 +20,6 @@ impl<'conn, Q: Query> CompiledStatement<'conn, Q> {
     /// Constructs a `CompiledStatement` from an untyped SQLite prepared statement.
     pub(crate) fn new(statement: CachedStatement<'conn>) -> Self {
         CompiledStatement {
-            key_buf: String::new(),
             statement,
             marker: PhantomData,
         }
@@ -33,25 +30,19 @@ impl<'conn, Q: Query> CompiledStatement<'conn, Q> {
     where
         P: Borrow<Q::Input<'p>>
     {
-        // bind parameters
-        let mut serializer = ParamSerializer::new(
-            &mut self.statement,
-            &mut self.key_buf,
-            Q::PARAM_PREFIX,
-        );
-        params.borrow().serialize(&mut serializer)?;
-        serializer.finalize()?;
+        // Bind parameters.
+        // Clear bindings upfront so that params from the previous invocation
+        // don't stick around accidentally.
+        self.statement.clear_bindings();
+        params.borrow().bind(&mut self.statement)?;
 
-        // execute query
-        // (we don't need raw_execute, as our deserializer works correctly for
+        // Execute query and extract returned rows.
+        // (we don't need raw_execute, as deserialization works correctly for
         // the combination of a return type of () and 0 rows being returned)
         let rows = self.statement.raw_query();
+        let result = Q::Output::from_rows(rows)?;
 
-        // extract returned rows
-        let deserializer = RowsDeserializer::new(rows);
-        let result = Q::Output::deserialize(deserializer)?;
-
-        // clear bindings so that big strings and blobs don't hog the memory
+        // Clear bindings again, so that big strings and blobs don't hog the memory.
         self.statement.clear_bindings();
 
         Ok(result)

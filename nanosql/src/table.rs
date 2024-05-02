@@ -2,20 +2,19 @@
 
 use core::marker::PhantomData;
 use core::fmt::{self, Debug, Formatter, Write};
-use serde::Serialize;
 use crate::{
     query::Query,
-    param::ParamPrefix,
+    param::Param,
     error::Result,
 };
 
 
 /// Implemented by UDTs that map to an SQL table.
-pub trait Table: Serialize {
+pub trait Table {
     /// The parameter set bound to an `INSERT` statement inserting into this table.
     /// In simple cases, it can be `Self`. For a more efficient implementation (no
     /// allocation) or to support default fields, specify a different input type.
-    type Input<'p>: Serialize;
+    type Input<'p>: Param;
 
     /// The value-level description of the table.
     const DESCRIPTION: TableDesc<'static>;
@@ -124,7 +123,7 @@ impl<T: Table> Debug for Create<T> {
 }
 
 impl<T: Table> Query for Create<T> {
-    type Input<'p> = [(); 0];
+    type Input<'p> = ();
     type Output = ();
 
     fn sql(&self) -> Result<impl AsRef<str> + '_> {
@@ -174,8 +173,6 @@ impl<T: Table> Query for Insert<T> {
     type Input<'p> = T::Input<'p>;
     type Output = ();
 
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Dollar;
-
     fn sql(&self) -> Result<impl AsRef<str> + '_> {
         let desc = T::DESCRIPTION;
         let mut sql = format!(r#"INSERT INTO "{}"("#, desc.name);
@@ -190,7 +187,7 @@ impl<T: Table> Query for Insert<T> {
         sep = "";
 
         for col in desc.columns {
-            write!(sql, "{}\n    {}{}", sep, Self::PARAM_PREFIX, col.name)?;
+            write!(sql, "{}\n    {}{}", sep, Self::Input::PARAM_PREFIX, col.name)?;
             sep = ", ";
         }
 

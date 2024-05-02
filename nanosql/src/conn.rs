@@ -32,7 +32,7 @@ pub trait ConnectionExt: Sealed {
 
     /// Creates the table represented by `T` if it does not yet exist.
     fn create_table<T: Table>(&self) -> Result<()> {
-        self.compile_invoke(Create::<T>::default(), [])
+        self.compile_invoke(Create::<T>::default(), ())
     }
 
     /// Convenience method for inserting many rows into a table in one go.
@@ -43,10 +43,10 @@ pub trait ConnectionExt: Sealed {
     /// and it does not lock the DB against reading between insertions. It is
     /// recommended to use the transactional method instead, unless you can't
     /// provide unique access to the [`Connection`].
-    fn insert_batch_no_txn<I>(&self, entities: I) -> Result<()>
+    fn insert_batch_no_txn<'p, I>(&self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: for<'p> Table<Input<'p> = I::Item>,
+        I::Item: Table<Input<'p> = I::Item>,
     {
 
         let mut stmt = self.compile(Insert::<I::Item>::default())?;
@@ -59,13 +59,11 @@ pub trait ConnectionExt: Sealed {
     /// This is a faster and safer variant of [`ConnectionExt::insert_batch_no_txn()`].
     /// It opens a single transaction for all of the insert statements, which prevents
     /// other queries from observing the data in a partially-inserted state.
-    fn insert_batch<I>(&mut self, entities: I) -> Result<()>
+    fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: for<'p> Table<Input<'p> = I::Item>;
+        I::Item: Table<Input<'p> = I::Item>;
 }
-
-impl Sealed for Connection {}
 
 impl ConnectionExt for Connection {
     fn compile<Q: Query>(&self, query: Q) -> Result<CompiledStatement<'_, Q>> {
@@ -75,13 +73,15 @@ impl ConnectionExt for Connection {
         Ok(CompiledStatement::new(statement))
     }
 
-    fn insert_batch<I>(&mut self, entities: I) -> Result<()>
+    fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: for<'p> Table<Input<'p> = I::Item>,
+        I::Item: Table<Input<'p> = I::Item>,
     {
         let txn = self.transaction_with_behavior(TransactionBehavior::Immediate)?;
         txn.insert_batch_no_txn(entities)?;
         txn.commit().map_err(Error::from)
     }
 }
+
+impl Sealed for Connection {}

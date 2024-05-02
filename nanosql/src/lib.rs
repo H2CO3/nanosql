@@ -12,13 +12,13 @@ pub mod stmt;
 pub mod conn;
 pub mod error;
 
-pub extern crate serde;
 pub extern crate rusqlite;
 
-pub use rusqlite::Connection;
+pub use rusqlite::{Connection, Statement, Rows, Row};
 pub use query::Query;
 pub use table::{Table, TableDesc, Column, Create, Insert};
 pub use stmt::CompiledStatement;
 pub use conn::ConnectionExt;
-pub use param::ParamPrefix;
+pub use param::{Param, ParamPrefix};
+pub use row::{ResultRecord, ResultSet, Single};
 pub use error::{Error, Result};
