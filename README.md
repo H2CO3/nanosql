@@ -28,19 +28,22 @@ The absolute basics - create a table, insert a bunch of records into it, then re
 
 ```rust
 use nanosql::{
-    Error, Result, Connection, ConnectionExt, Query,
-    Param, Row, ResultRecord, Table, TableDesc, Column,
+    Result, Connection, ConnectionExt, Query,
+    Param, ResultRecord, Table, TableDesc, Column,
 };
 
 
 /// This type is going to represent our table.
 ///
 /// We derive the `Param` trait for it so that it can be used for
-/// binding parameters to the statement when inserting new records.
+/// binding parameters to the statement when inserting new records,
+/// and the `ResultRecord` trait so that we can use it to retrieve
+/// results, too.
 ///
 /// The parameter prefix is '$' by default (if not specified via the
-/// param_prefix attribute); it may also be one of ':', '@', or '?'.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Param)]
+/// param_prefix attribute); it may also be one of ':', '@', or '?',
+/// the last one being allowed only for tuples and scalar parameters.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Param, ResultRecord)]
 #[nanosql(param_prefix = '$')] // optional
 struct Pet {
     id: i64,
@@ -64,35 +67,15 @@ impl Table for Pet {
     };
 }
 
-impl ResultRecord for Pet {
-    fn from_row(row: &Row<'_>) -> Result<Self> {
-        let expected = 3;
-        let actual = row.as_ref().column_count();
-
-        if actual != expected {
-            return Err(Error::ColumnCountMismatch { expected, actual });
-        }
-
-        Ok(Pet {
-            id: row.get("id")?,
-            name: row.get("name")?,
-            kind: row.get("kind")?,
-        })
-    }
-}
-
 /// Our first custom query retrieves a pet by its unique ID.
+///
+/// If you don't want to spell out the impl by hand, you can
+/// use the `define_query!{}` macro for a shorter incantation.
 struct PetById;
 
 impl Query for PetById {
     /// The type of the parameter(s). This can be a single scalar, a tuple,
-    /// a tuple struct, or a struct with named fields.
-    ///
-    /// By default, scalars, tuples, and tuple structs use `?` because they
-    /// are fundamentally positional parameters. The derive macro for structs
-    /// with named fields uses `$` by default, since `?` doesn't allow named
-    /// parameters, and among the three other prefixes that do (`$`, `:`, and
-    /// `@`), the most flexible one is `$`.
+    /// a tuple struct of scalars, or a struct with named fields of scalar types.
     type Input<'p> = i64;
 
     /// The return type of a query can be either a scalar, a single record (struct or

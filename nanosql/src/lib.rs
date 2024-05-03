@@ -27,4 +27,4 @@ pub use row::{ResultRecord, ResultSet, Single};
 pub use error::{Error, Result};
 
 #[cfg(feature = "derive")]
-pub use nanosql_macros::{Param};
+pub use nanosql_macros::{Param, ResultRecord};

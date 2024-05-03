@@ -1,10 +1,10 @@
 //! Utility queries for common tasks: `CREATE TABLE`, `INSERT`, etc.
 
 use core::marker::PhantomData;
-use core::fmt::{self, Debug, Formatter, Write};
+use core::fmt::{self, Display, Debug, Formatter, Write};
 use crate::{
     query::Query,
-    param::Param,
+    param::{Param, ParamPrefix},
     error::Result,
 };
 
@@ -186,8 +186,15 @@ impl<T: Table> Query for Insert<T> {
         sql.push_str("\n)\nVALUES(");
         sep = "";
 
-        for col in desc.columns {
-            write!(sql, "{}\n    {}{}", sep, Self::Input::PREFIX, col.name)?;
+        for (idx, col) in (1..).zip(desc.columns) {
+            // decide intelligently whether parameters should be named or numbered
+            let param_name: &dyn Display = match Self::Input::PREFIX {
+                ParamPrefix::Question => &idx,
+                ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => &col.name
+            };
+
+            write!(sql, "{}\n    {}{}", sep, Self::Input::PREFIX, param_name)?;
+
             sep = ", ";
         }
 

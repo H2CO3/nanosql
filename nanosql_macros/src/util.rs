@@ -1,9 +1,13 @@
+use core::fmt::{self, Display, Formatter, Write};
 use std::collections::HashSet;
 use proc_macro::TokenStream as TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
-use syn::{Error, Token, Fields, WhereClause, WherePredicate, TypeParamBound};
-use syn::punctuated::Punctuated;
+use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
+use syn::{Error, Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit};
 use syn::parse_quote;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use quote::ToTokens;
+use deluxe::{ParseAttributes, ParseMetaItem};
 
 
 pub fn expand<F>(ts: TokenStream, f: F) -> TokenStream
@@ -50,4 +54,120 @@ pub fn add_bounds(
     );
 
     Ok(where_clause)
+}
+
+/// Top-level attributes on a struct or enum definition.
+#[derive(Clone, Debug, ParseAttributes)]
+#[deluxe(attributes(nanosql))]
+pub struct ContainerAttributes {
+    #[deluxe(alias = prefix, alias = param_pfx)]
+    pub param_prefix: Option<ParamPrefix>,
+}
+
+/// Represents the allowed (and compulsory) first character of a parameter
+/// name, in a way that's parseable and emittable in a Syn/Quote context.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ParamPrefix {
+    Dollar = b'$',
+    Colon = b':',
+    Question = b'?',
+    At = b'@',
+}
+
+impl ParamPrefix {
+    /// Returns the underlying raw byte.
+    pub const fn as_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// Returns the underlying raw character.
+    pub const fn as_char(self) -> char {
+        self as u8 as char
+    }
+}
+
+impl From<ParamPrefix> for u8 {
+    fn from(prefix: ParamPrefix) -> Self {
+        prefix.as_byte()
+    }
+}
+
+impl From<ParamPrefix> for char {
+    fn from(prefix: ParamPrefix) -> Self {
+        prefix.as_char()
+    }
+}
+
+impl TryFrom<char> for ParamPrefix {
+    type Error = Error;
+
+    fn try_from(ch: char) -> Result<Self, Self::Error> {
+        match ch {
+            '$' => Ok(ParamPrefix::Dollar),
+            ':' => Ok(ParamPrefix::Colon),
+            '?' => Ok(ParamPrefix::Question),
+            '@' => Ok(ParamPrefix::At),
+            _   => Err(Error::new(
+                Span::call_site(),
+                format_args!("invalid parameter prefix: `{ch}`")
+            )),
+        }
+    }
+}
+
+impl TryFrom<u8> for ParamPrefix {
+    type Error = Error;
+
+    fn try_from(byte: u8) -> Result<Self, Self::Error> {
+        char::from(byte).try_into()
+    }
+}
+
+impl Display for ParamPrefix {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_char(self.as_char())
+    }
+}
+
+impl Parse for ParamPrefix {
+    fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
+        let lit = Lit::parse(stream)?;
+
+        match lit {
+            Lit::Char(lit) => match lit.value() {
+                '$' => Ok(ParamPrefix::Dollar),
+                ':' => Ok(ParamPrefix::Colon),
+                '?' => Ok(ParamPrefix::Question),
+                '@' => Ok(ParamPrefix::At),
+                ch  => Err(stream.error(format_args!("invalid parameter prefix: `{ch}`"))),
+            },
+            Lit::Str(lit) => match lit.value().as_str() {
+                "$" => Ok(ParamPrefix::Dollar),
+                ":" => Ok(ParamPrefix::Colon),
+                "?" => Ok(ParamPrefix::Question),
+                "@" => Ok(ParamPrefix::At),
+                s   => Err(stream.error(format_args!("invalid parameter prefix: `{s}`"))),
+            },
+            _ => Err(stream.error("expected character or string literal")),
+        }
+    }
+}
+
+impl ToTokens for ParamPrefix {
+    fn to_tokens(&self, ts: &mut TokenStream2) {
+        let variant_name = match *self {
+            ParamPrefix::Dollar   => "Dollar",
+            ParamPrefix::Colon    => "Colon",
+            ParamPrefix::Question => "Question",
+            ParamPrefix::At       => "At",
+        };
+        Ident::new(variant_name, Span::call_site()).to_tokens(ts);
+    }
+}
+
+impl ParseMetaItem for ParamPrefix {
+    fn parse_meta_item(stream: ParseStream<'_>, _: deluxe::ParseMode) -> Result<Self, Error> {
+        ParamPrefix::parse(stream)
+    }
 }

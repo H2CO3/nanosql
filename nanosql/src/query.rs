@@ -106,9 +106,9 @@ where
 ///     age: usize,
 ///     boss_id: u64,
 /// }
-/// #
+///
 /// impl ResultRecord for Employee {
-///     // uninteresting details hidden
+///     // (uninteresting details hidden)
 /// #     fn from_row(_: &Row<'_>) -> Result<Self> {
 /// #         Ok(Employee::default())
 /// #     }
@@ -140,12 +140,13 @@ where
 ///     let mut stmt = conn.compile(YoungEmployeesByName)?;
 ///
 ///     // Get all employees named Joe under 21
+///     // (details of creating and populating the table have been omitted)
 ///     let employees: Vec<Employee> = stmt.invoke(YoungEmployeesByNameParams {
-///         name: "Jone",
+///         name: "Joe",
 ///         max_age: 21,
 ///     })?;
 ///
-///     // suppose there were 2 of them
+///     // suppose there are 2 of them
 ///     assert_eq!(employees.len(), 2);
 ///
 ///     Ok(())
