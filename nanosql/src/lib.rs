@@ -14,7 +14,10 @@ pub mod error;
 
 pub extern crate rusqlite;
 
-pub use rusqlite::{Connection, Statement, Rows, Row};
+pub use rusqlite::{
+    Connection, Statement, Rows, Row,
+    types::{self, ToSql, FromSql, Value, ValueRef, ToSqlOutput},
+};
 pub use query::Query;
 pub use table::{Table, TableDesc, Column, Create, Insert};
 pub use stmt::CompiledStatement;

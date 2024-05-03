@@ -1,11 +1,14 @@
 use core::fmt::{self, Display, Formatter, Write};
 use proc_macro2::{TokenStream, Span, Ident};
-use syn::{Error, DeriveInput, Data, Fields, FieldsNamed, FieldsUnnamed, Lit};
+use syn::{Error, Lit, WhereClause};
+use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields, FieldsNamed, FieldsUnnamed};
 use syn::parse::{Parse, ParseStream};
+use syn::parse_quote;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
 use quote::{quote, ToTokens};
 use deluxe::{ParseMetaItem, ParseAttributes};
+use crate::util::add_bounds;
 
 
 #[derive(Clone, Debug, ParseAttributes)]
@@ -15,50 +18,58 @@ struct ParamAttributes {
     param_prefix: Option<ParamPrefix>,
 }
 
-/// TODO(H2CO3): handle generics
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
+    let attrs: ParamAttributes = deluxe::parse_attributes(&input)?;
 
     match &input.data {
-        Data::Struct(data) => {
-            let ty_name = &input.ident;
-            let num_fields = data.fields.len();
-            let attrs: ParamAttributes = deluxe::parse_attributes(&input)?;
-
-            let (body, prefix) = match &data.fields {
-                Fields::Named(fields) => expand_named_fields(fields, &attrs)?,
-                Fields::Unnamed(fields) => expand_unnamed_fields(fields, &attrs)?,
-                Fields::Unit => (TokenStream::new(), ParamPrefix::Question),
-            };
-
-            Ok(quote!{
-                impl ::nanosql::Param for #ty_name {
-                    const PREFIX: ::nanosql::ParamPrefix = ::nanosql::ParamPrefix::#prefix;
-
-                    fn bind(&self, statement: &mut ::nanosql::Statement<'_>) -> ::nanosql::Result<()> {
-                        let expected = statement.parameter_count();
-                        let actual = #num_fields;
-
-                        if actual != expected {
-                            return ::nanosql::Result::Err(
-                                ::nanosql::Error::ParamCountMismatch { expected, actual }
-                            );
-                        }
-
-                        #body
-
-                        ::nanosql::Result::Ok(())
-                    }
-                }
-            })
-        }
-        Data::Enum(_) => {
-            Err(Error::new_spanned(&input, "#[derive(Params)] is not yet implemented for enums"))
-        }
+        Data::Struct(data) => expand_struct(&input, attrs, data),
+        Data::Enum(data) => expand_enum(&input, attrs, data),
         Data::Union(_) => {
             Err(Error::new_spanned(&input, "#[derive(Params)] is not supported for unions"))
         }
     }
+}
+
+/// Implements the bulk of the logic for a struct (either named fields or tuple).
+fn expand_struct(
+    input: &DeriveInput,
+    attrs: ParamAttributes,
+    data: &DataStruct,
+) -> Result<TokenStream, Error> {
+    let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
+    let bounds = parse_quote!(::nanosql::ToSql);
+    let where_clause = add_bounds(&data.fields, where_clause, bounds)?;
+
+    let (body, prefix) = match &data.fields {
+        Fields::Named(fields) => expand_named_fields(fields, &attrs)?,
+        Fields::Unnamed(fields) => expand_unnamed_fields(fields, &attrs)?,
+        Fields::Unit => (TokenStream::new(), ParamPrefix::Question),
+    };
+
+    let ty_name = &input.ident;
+    let num_fields = data.fields.len();
+
+    Ok(quote!{
+        impl #impl_gen ::nanosql::Param for #ty_name #ty_gen #where_clause {
+            const PREFIX: ::nanosql::ParamPrefix = ::nanosql::ParamPrefix::#prefix;
+
+            fn bind(&self, statement: &mut ::nanosql::Statement<'_>) -> ::nanosql::Result<()> {
+                let expected = statement.parameter_count();
+                let actual = #num_fields;
+
+                if actual != expected {
+                    return ::nanosql::Result::Err(
+                        ::nanosql::Error::ParamCountMismatch { expected, actual }
+                    );
+                }
+
+                #body
+
+                ::nanosql::Result::Ok(())
+            }
+        }
+    })
 }
 
 fn expand_named_fields(
@@ -141,6 +152,66 @@ fn expand_unnamed_fields(
     Ok((body, prefix))
 }
 
+/// Implements the bulk of the logic for an `enum` with all unit-like variants.
+fn expand_enum(
+    input: &DeriveInput,
+    attrs: ParamAttributes,
+    data: &DataEnum,
+) -> Result<TokenStream, Error> {
+    let prefix = attrs.param_prefix.unwrap_or(ParamPrefix::Question);
+    let ty_name = &input.ident;
+
+    match prefix {
+        ParamPrefix::Question => {}
+        ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => {
+            return Err(Error::new_spanned(
+                input,
+                format_args!("parameter prefix `{prefix}` is not allowed for enums")
+            ));
+        }
+    }
+
+    // add `where Self: ToSql` bound for clearer error message
+    let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
+    let mut where_clause = where_clause.cloned().unwrap_or_else(|| {
+        WhereClause {
+            where_token: Default::default(),
+            predicates: Default::default(),
+        }
+    });
+    where_clause.predicates.push(parse_quote!(Self: ::nanosql::ToSql));
+
+    // ensure that all variants are unit-like
+    for variant in &data.variants {
+        let Fields::Unit = variant.fields else {
+            return Err(Error::new_spanned(variant, "only unit-like variants are allowed"));
+        };
+    }
+
+    Ok(quote!{
+        impl #impl_gen ::nanosql::Param for #ty_name #ty_gen #where_clause {
+            const PREFIX: ::nanosql::ParamPrefix = ::nanosql::ParamPrefix::#prefix;
+
+            fn bind(&self, statement: &mut ::nanosql::Statement<'_>) -> ::nanosql::Result<()> {
+                let expected = statement.parameter_count();
+                let actual = 1;
+
+                if actual != expected {
+                    return ::nanosql::Result::Err(
+                        ::nanosql::Error::ParamCountMismatch { expected, actual }
+                    );
+                }
+
+                statement.raw_bind_parameter(1, self)?;
+
+                ::nanosql::Result::Ok(())
+            }
+        }
+    })
+}
+
+/// Represents the allowed (and compulsory) first character of a parameter
+/// name, in a way that's parseable and emittable in a Syn/Quote context.
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ParamPrefix {
