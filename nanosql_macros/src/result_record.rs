@@ -137,7 +137,7 @@ fn expand_enum(
                 }
 
                 // columns are 0-indexed
-                row.get(0).map(<::nanosql::Error as ::core::convert::From>::from)
+                row.get(0).map_err(<::nanosql::Error as ::core::convert::From<_>>::from)
             }
         }
     })
