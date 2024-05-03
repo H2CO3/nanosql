@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 rusqlite = "0.31.0"
 thiserror = "1.0.59"
+nanosql_macros = { path = "../nanosql_macros", version = "0.1.0", optional = true }
+
+[features]
+derive = ["dep:nanosql_macros"]

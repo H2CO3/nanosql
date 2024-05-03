@@ -28,13 +28,20 @@ The absolute basics - create a table, insert a bunch of records into it, then re
 
 ```rust
 use nanosql::{
-    Error, Result, Statement, Connection, ConnectionExt, Query,
-    Param, ParamPrefix, Row, ResultRecord, Table, TableDesc, Column,
+    Error, Result, Connection, ConnectionExt, Query,
+    Param, Row, ResultRecord, Table, TableDesc, Column,
 };
 
 
 /// This type is going to represent our table.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+///
+/// We derive the `Param` trait for it so that it can be used for
+/// binding parameters to the statement when inserting new records.
+///
+/// The parameter prefix is '$' by default (if not specified via the
+/// param_prefix attribute); it may also be one of ':', '@', or '?'.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Param)]
+#[nanosql(param_prefix = '$')] // optional
 struct Pet {
     id: i64,
     name: String,
@@ -45,7 +52,7 @@ struct Pet {
 /// functions as to how creating the table and inserting records works.
 impl Table for Pet {
     /// In the simplest case, the input of an `INSERT` is just a record of the table type.
-    type Input<'p> = Self;
+    type InsertInput<'p> = Self;
 
     const DESCRIPTION: TableDesc<'static> = TableDesc {
         name: "pet",
@@ -55,36 +62,6 @@ impl Table for Pet {
             Column::new("kind").ty("TEXT"),
         ],
     };
-}
-
-/// We implement the `Param` trait for our record type so that it can be used for
-/// binding parameters to the statement when inserting new records.
-impl Param for Pet {
-    /// We need to specify the leading symbol in front of the parameter names.
-    /// NanoSQL encourages the use of named parameters, so the default choice
-    /// should be the dollar (`$`) sign (`ParamPrefix::Dollar`). This must in
-    /// turn match the parameter names in the implementation of `Param::bind`.
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Dollar;
-
-    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
-        let expected = statement.parameter_count();
-        let actual = 3;
-
-        if actual != expected {
-            return Err(Error::ParamCountMismatch { expected, actual });
-        }
-
-        let index = statement.parameter_index("$id")?.ok_or(Error::unknown_param("$id"))?;
-        statement.raw_bind_parameter(index, &self.id)?;
-
-        let index = statement.parameter_index("$name")?.ok_or(Error::unknown_param("$name"))?;
-        statement.raw_bind_parameter(index, &self.name)?;
-
-        let index = statement.parameter_index("$kind")?.ok_or(Error::unknown_param("$name"))?;
-        statement.raw_bind_parameter(index, &self.kind)?;
-
-        Ok(())
-    }
 }
 
 impl ResultRecord for Pet {

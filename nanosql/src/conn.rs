@@ -46,7 +46,7 @@ pub trait ConnectionExt: Sealed {
     fn insert_batch_no_txn<'p, I>(&self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: Table<Input<'p> = I::Item>,
+        I::Item: Table<InsertInput<'p> = I::Item>,
     {
 
         let mut stmt = self.compile(Insert::<I::Item>::default())?;
@@ -62,7 +62,7 @@ pub trait ConnectionExt: Sealed {
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: Table<Input<'p> = I::Item>;
+        I::Item: Table<InsertInput<'p> = I::Item>;
 }
 
 impl ConnectionExt for Connection {
@@ -76,7 +76,7 @@ impl ConnectionExt for Connection {
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: Table<Input<'p> = I::Item>,
+        I::Item: Table<InsertInput<'p> = I::Item>,
     {
         let txn = self.transaction_with_behavior(TransactionBehavior::Immediate)?;
         txn.insert_batch_no_txn(entities)?;

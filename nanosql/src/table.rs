@@ -14,7 +14,7 @@ pub trait Table {
     /// The parameter set bound to an `INSERT` statement inserting into this table.
     /// In simple cases, it can be `Self`. For a more efficient implementation (no
     /// allocation) or to support default fields, specify a different input type.
-    type Input<'p>: Param;
+    type InsertInput<'p>: Param;
 
     /// The value-level description of the table.
     const DESCRIPTION: TableDesc<'static>;
@@ -24,7 +24,7 @@ impl<T> Table for &T
 where
     T: ?Sized + Table
 {
-    type Input<'p> = T::Input<'p>;
+    type InsertInput<'p> = T::InsertInput<'p>;
 
     const DESCRIPTION: TableDesc<'static> = T::DESCRIPTION;
 }
@@ -33,7 +33,7 @@ impl<T> Table for &mut T
 where
     T: ?Sized + Table
 {
-    type Input<'p> = T::Input<'p>;
+    type InsertInput<'p> = T::InsertInput<'p>;
 
     const DESCRIPTION: TableDesc<'static> = T::DESCRIPTION;
 }
@@ -42,7 +42,7 @@ impl<T> Table for Box<T>
 where
     T: ?Sized + Table
 {
-    type Input<'p> = T::Input<'p>;
+    type InsertInput<'p> = T::InsertInput<'p>;
 
     const DESCRIPTION: TableDesc<'static> = T::DESCRIPTION;
 }
@@ -170,7 +170,7 @@ impl<T: Table> Debug for Insert<T> {
 }
 
 impl<T: Table> Query for Insert<T> {
-    type Input<'p> = T::Input<'p>;
+    type Input<'p> = T::InsertInput<'p>;
     type Output = ();
 
     fn sql(&self) -> Result<impl AsRef<str> + '_> {
@@ -187,7 +187,7 @@ impl<T: Table> Query for Insert<T> {
         sep = "";
 
         for col in desc.columns {
-            write!(sql, "{}\n    {}{}", sep, Self::Input::PARAM_PREFIX, col.name)?;
+            write!(sql, "{}\n    {}{}", sep, Self::Input::PREFIX, col.name)?;
             sep = ", ";
         }
 

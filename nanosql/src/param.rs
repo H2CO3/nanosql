@@ -12,6 +12,7 @@ use core::num::{
     NonZeroIsize,
     NonZeroUsize,
 };
+use core::str::FromStr;
 use core::fmt::{self, Display, Formatter, Write};
 use std::borrow::Cow;
 use std::rc::Rc;
@@ -90,6 +91,14 @@ impl Display for ParamPrefix {
     }
 }
 
+impl FromStr for ParamPrefix {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        char::from_str(s).map_err(Error::other).and_then(Self::try_from)
+    }
+}
+
 /// Describes types that can be bound as parameters to a compiled statement.
 ///
 /// The kinds of types implementing this trait include:
@@ -100,7 +109,7 @@ impl Display for ParamPrefix {
 /// * Singleton/forwarding wrappers of any of the above, e.g. `&T` and `Box`
 pub trait Param {
     /// The leading symbol in parameter names. (Must be consistent across parameters.)
-    const PARAM_PREFIX: ParamPrefix;
+    const PREFIX: ParamPrefix;
 
     /// Binds the primitive or the field(s) of a tuple to a raw `rusqlite::Statement`.
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()>;
@@ -124,7 +133,7 @@ macro_rules! impl_param_for_primitive {
     ($($ty:ty,)*) => {$(
         impl Param for $ty {
             /// Primitives are bound as positional parameters, hence the prefix is '?'
-            const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+            const PREFIX: ParamPrefix = ParamPrefix::Question;
 
             fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
                 bind_primitive(statement, self)
@@ -168,7 +177,7 @@ impl_param_for_primitive!{
 
 impl Param for ValueRef<'_> {
     /// Primitives are bound as positional parameters, hence the prefix is '?'
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+    const PREFIX: ParamPrefix = ParamPrefix::Question;
 
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
         bind_primitive(statement, ToSqlOutput::Borrowed(*self))
@@ -177,7 +186,7 @@ impl Param for ValueRef<'_> {
 
 impl<const N: usize> Param for [u8; N] {
     /// Primitives are bound as positional parameters, hence the prefix is '?'
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+    const PREFIX: ParamPrefix = ParamPrefix::Question;
 
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
         bind_primitive(statement, self)
@@ -188,7 +197,7 @@ macro_rules! impl_param_for_tuple {
     () => {
         impl Param for () {
             /// Tuples use positional parameters, hence the prefix is '?'
-            const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+            const PREFIX: ParamPrefix = ParamPrefix::Question;
 
             fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
                 let expected = statement.parameter_count();
@@ -209,7 +218,7 @@ macro_rules! impl_param_for_tuple {
             $($rest_ty: ToSql,)*
         {
             /// Tuples use positional parameters, hence the prefix is '?'
-            const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+            const PREFIX: ParamPrefix = ParamPrefix::Question;
 
             fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
                 let ($head_id, $($rest_id,)*) = self;
@@ -269,7 +278,7 @@ impl_param_for_tuple!{
 macro_rules! impl_param_for_wrapper {
     ($($ty:ty;)*) => {$(
         impl<T: ?Sized + Param> Param for $ty {
-            const PARAM_PREFIX: ParamPrefix = T::PARAM_PREFIX;
+            const PREFIX: ParamPrefix = T::PREFIX;
 
             fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
                 let body = |value: &$ty, statement| Param::bind(&**value, statement);
@@ -291,7 +300,7 @@ impl<T> Param for Cow<'_, T>
 where
     T: ?Sized + ToOwned + Param,
 {
-    const PARAM_PREFIX: ParamPrefix = T::PARAM_PREFIX;
+    const PREFIX: ParamPrefix = T::PREFIX;
 
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
         Param::bind(&**self, statement)
@@ -300,7 +309,7 @@ where
 
 impl<T: ToSql> Param for Option<T> {
     /// Primitives are bound as positional parameters, hence the prefix is '?'
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Question;
+    const PREFIX: ParamPrefix = ParamPrefix::Question;
 
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
         bind_primitive(statement, self)
@@ -313,7 +322,7 @@ where
     V: ToSql,
 {
     /// Dynamic maps use `$` by default because it's the most flexible prefix.
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Dollar;
+    const PREFIX: ParamPrefix = ParamPrefix::Dollar;
 
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
         let expected = statement.parameter_count();
@@ -328,7 +337,7 @@ where
 
         for (key, value) in self {
             name_buf.clear();
-            write!(name_buf, "{}{}", Self::PARAM_PREFIX, key)?;
+            write!(name_buf, "{}{}", Self::PREFIX, key)?;
 
             let index = statement.parameter_index(name_buf.as_str())?.ok_or_else(|| {
                 Error::unknown_param_dyn(&name_buf)
@@ -347,7 +356,7 @@ where
     V: ToSql,
 {
     /// Dynamic maps use `$` by default because it's the most flexible prefix.
-    const PARAM_PREFIX: ParamPrefix = ParamPrefix::Dollar;
+    const PREFIX: ParamPrefix = ParamPrefix::Dollar;
 
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
         let expected = statement.parameter_count();
@@ -362,7 +371,7 @@ where
 
         for (key, value) in self {
             name_buf.clear();
-            write!(name_buf, "{}{}", Self::PARAM_PREFIX, key)?;
+            write!(name_buf, "{}{}", Self::PREFIX, key)?;
 
             let index = statement.parameter_index(name_buf.as_str())?.ok_or_else(|| {
                 Error::unknown_param_dyn(&name_buf)

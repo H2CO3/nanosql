@@ -22,3 +22,6 @@ pub use conn::ConnectionExt;
 pub use param::{Param, ParamPrefix};
 pub use row::{ResultRecord, ResultSet, Single};
 pub use error::{Error, Result};
+
+#[cfg(feature = "derive")]
+pub use nanosql_macros::{Param};
