@@ -69,3 +69,103 @@ where
         Q::sql(&**self)
     }
 }
+
+/// Creates a new `struct` and implements [`Query`] for it using a function-like syntax.
+/// The invocation looks like the following:
+///
+/// ```ignore
+/// declare_query!{
+///     QueryName<'lt>: InputType<'lt> => OutputType { "SQL (impl AsRef<str>)" }
+/// }
+/// ```
+///
+/// The query name may be preceded by a visibility specifier (e.g. `pub`) to control the scope.
+///
+/// The macro brings the lifetime `'lt` into scope when binding the input type, so
+/// you can use it for defining the input type as a reference or reference-like type.
+/// The SQL expression may borrow immutably from `self` and may use the `?` operator
+/// to return an error when building the SQL query string.
+///
+/// You can declare multiple queries in the same invocation by repeating the above pattern.
+///
+/// Example:
+///
+/// ```rust
+/// # use nanosql::{Result, Connection, ConnectionExt, Param, Row, ResultRecord};
+/// #[derive(Clone, Copy, Debug, Param)]
+/// #[nanosql(param_prefix = '@')]
+/// struct YoungEmployeesByNameParams<'n> {
+///     name: &'n str,
+///     max_age: usize,
+/// }
+///
+/// #[derive(Clone, Default, Debug)]
+/// struct Employee {
+///     id: u64,
+///     name: String,
+///     age: usize,
+///     boss_id: u64,
+/// }
+/// #
+/// impl ResultRecord for Employee {
+///     // uninteresting details hidden
+/// #     fn from_row(_: &Row<'_>) -> Result<Self> {
+/// #         Ok(Employee::default())
+/// #     }
+/// }
+///
+/// nanosql::define_query! {
+///     // A simple query that only uses built-in types.
+///     pub PetNameById<'p>: i64 => Option<String> {
+///         "SELECT name FROM pet WHERE id = ?"
+///     }
+///
+///     // A more involved query that uses the domain types defined above.
+///     pub(crate) YoungEmployeesByName<'p>: YoungEmployeesByNameParams<'p> => Vec<Employee> {
+/// # /*
+///         r#"
+///         SELECT id, name, age, boss_id
+///         FROM employee
+///         WHERE name LIKE @name AND age <= @max_age
+///         "#
+/// # */
+/// #       "VALUES (@name), (@max_age)" // so that the query returns some rows and uses 2 params
+///     }
+/// }
+///
+/// fn main() -> Result<()> {
+///     let conn = Connection::open_in_memory()?;
+///
+///     // Compile the query
+///     let mut stmt = conn.compile(YoungEmployeesByName)?;
+///
+///     // Get all employees named Joe under 21
+///     let employees: Vec<Employee> = stmt.invoke(YoungEmployeesByNameParams {
+///         name: "Jone",
+///         max_age: 21,
+///     })?;
+///
+///     // suppose there were 2 of them
+///     assert_eq!(employees.len(), 2);
+///
+///     Ok(())
+/// }
+/// ```
+#[macro_export]
+macro_rules! define_query {
+    ($(
+        $vis:vis $tyname:ident<$lt:lifetime>: $input_ty:ty => $output_ty:ty { $sql:expr }
+    )*) => {$(
+        #[derive(Clone, Copy, Default, Debug)]
+        $vis struct $tyname;
+
+        impl ::nanosql::Query for $tyname {
+            type Input<$lt> = $input_ty;
+            type Output = $output_ty;
+
+            fn sql(&self) -> ::nanosql::Result<impl ::core::convert::AsRef<::core::primitive::str> + '_> {
+                ::nanosql::Result::Ok($sql)
+            }
+        }
+    )*}
+}
