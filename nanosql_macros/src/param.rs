@@ -117,7 +117,7 @@ fn expand_unnamed_fields(
     fields: &FieldsUnnamed,
     attrs: &ParamAttributes,
 ) -> Result<(TokenStream, ParamPrefix), Error> {
-    let prefix = attrs.param_prefix.unwrap_or(ParamPrefix::Dollar);
+    let prefix = attrs.param_prefix.unwrap_or(ParamPrefix::Question);
 
     match prefix {
         ParamPrefix::Question => {}
