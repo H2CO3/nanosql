@@ -296,6 +296,7 @@ impl_result_record_for_primitive!{
     Box<str>,
     String,
     Vec<u8>,
+    Value,
 }
 
 macro_rules! impl_result_record_for_tuple {
@@ -388,12 +389,6 @@ impl<const N: usize> ResultRecord for [u8; N] {
 impl ResultRecord for Box<[u8]> {
     fn from_row(row: &Row<'_>) -> Result<Self> {
         primitive_from_sql(row).map(Vec::into_boxed_slice)
-    }
-}
-
-impl ResultRecord for Value {
-    fn from_row(row: &Row<'_>) -> Result<Self> {
-        primitive_from_sql(row)
     }
 }
 

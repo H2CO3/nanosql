@@ -48,7 +48,6 @@ pub trait ConnectionExt: Sealed {
         I: IntoIterator,
         I::Item: Table<InsertInput<'p> = I::Item>,
     {
-
         let mut stmt = self.compile(Insert::<I::Item>::default())?;
 
         entities
