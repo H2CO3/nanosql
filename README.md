@@ -29,7 +29,7 @@ The absolute basics - create a table, insert a bunch of records into it, then re
 ```rust
 use nanosql::{
     Result, Connection, ConnectionExt, Query,
-    Param, ResultRecord, Table, TableDesc, Column,
+    Param, ResultRecord, Table, TableDesc, Column, TyPrim
 };
 
 
@@ -57,14 +57,12 @@ impl Table for Pet {
     /// In the simplest case, the input of an `INSERT` is just a record of the table type.
     type InsertInput<'p> = Self;
 
-    const DESCRIPTION: TableDesc<'static> = TableDesc {
-        name: "pet",
-        columns: &[
-            Column::new("id").ty("INTEGER").pk(),
-            Column::new("name").ty("TEXT"),
-            Column::new("kind").ty("TEXT"),
-        ],
-    };
+    fn description() -> TableDesc {
+        TableDesc::new("pet")
+            .column(Column::new("id").ty(TyPrim::Integer).pk())
+            .column(Column::new("name").ty(TyPrim::Text))
+            .column(Column::new("kind").ty(TyPrim::Text))
+    }
 }
 
 /// Our first custom query retrieves a pet by its unique ID.

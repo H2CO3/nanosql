@@ -19,7 +19,7 @@ pub use rusqlite::{
     types::{self, ToSql, FromSql, Value, ValueRef, ToSqlOutput},
 };
 pub use query::Query;
-pub use table::{Table, TableDesc, Column, Create, Insert};
+pub use table::{Table, TableDesc, Column, SqlTy, TyPrim, Create, Insert};
 pub use stmt::CompiledStatement;
 pub use conn::ConnectionExt;
 pub use param::{Param, ParamPrefix};
