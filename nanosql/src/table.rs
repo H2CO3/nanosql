@@ -178,7 +178,10 @@ impl Display for Column {
             write!(formatter, " {ty}")?;
         }
 
-        // TODO(H2CO3): write constraints
+        for c in &self.constraints {
+            write!(formatter, " {c}")?;
+        }
+
         Ok(())
     }
 }
@@ -292,6 +295,31 @@ pub enum ColumnConstraint {
     },
 }
 
+impl Display for ColumnConstraint {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            ColumnConstraint::PrimaryKey => {
+                formatter.write_str("PRIMARY KEY")
+            }
+            ColumnConstraint::ForeignKey { table, column } => {
+                write!(formatter, r#"REFERENCES "{table}"("{column}")"#)
+            }
+            ColumnConstraint::Unique => {
+                formatter.write_str("UNIQUE")
+            }
+            ColumnConstraint::Default { expr } => {
+                write!(formatter, "DEFAULT ({expr})")
+            }
+            ColumnConstraint::Generated { expr, kind } => {
+                write!(formatter, "GENERATED ALWAYS AS ({expr}) {kind}")
+            }
+            ColumnConstraint::Check { condition } => {
+                write!(formatter, "CHECK ({condition})")
+            }
+        }
+    }
+}
+
 /// Whether the value of a `GENERATED` column is stored or always computed on-demand.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum GeneratedColumnKind {
@@ -302,6 +330,15 @@ pub enum GeneratedColumnKind {
     Stored,
 }
 
+impl Display for GeneratedColumnKind {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match *self {
+            GeneratedColumnKind::Virtual => "VIRTUAL",
+            GeneratedColumnKind::Stored  => "STORED",
+        })
+    }
+}
+
 /// A top-level constraint applied to an entire table at once.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum TableConstraint {
@@ -310,6 +347,24 @@ pub enum TableConstraint {
         /// The columns in this table that together constitute its composite primary key.
         columns: Vec<String>,
     },
+}
+
+impl Display for TableConstraint {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            TableConstraint::PrimaryKey { columns } => {
+                formatter.write_str("PRIMARY KEY(")?;
+
+                let mut sep = "";
+                for col in columns {
+                    write!(formatter, "{sep}{col}")?;
+                    sep = ", ";
+                }
+
+                formatter.write_char(')')
+            }
+        }
+    }
 }
 
 /// A `CREATE TABLE IF NOT EXISTS` statement, for ensuring that this table exists.
@@ -347,6 +402,10 @@ impl<T: Table> Query for Create<T> {
         for column in &desc.columns {
             write!(sql, "{sep}\n    {column}")?;
             sep = ", ";
+        }
+
+        for constraint in &desc.constraints {
+            write!(sql, "{sep}\n    {constraint}")?;
         }
 
         sql.push_str("\n);");
