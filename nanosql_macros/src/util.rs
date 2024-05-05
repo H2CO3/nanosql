@@ -2,7 +2,7 @@ use core::fmt::{self, Display, Formatter, Write};
 use std::collections::HashSet;
 use proc_macro::TokenStream as TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
-use syn::{Error, Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit};
+use syn::{Error, Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit, Lifetime};
 use syn::parse_quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
@@ -60,8 +60,16 @@ pub fn add_bounds(
 #[derive(Clone, Debug, ParseAttributes)]
 #[deluxe(attributes(nanosql))]
 pub struct ContainerAttributes {
+    /// For `#[derive(Param)]`: specifies the prefix character before the parameter name.
     #[deluxe(alias = prefix, alias = param_pfx)]
     pub param_prefix: Option<ParamPrefix>,
+    /// For `#[derive(Table)]`: changes the `InsertInput` associated type from `Self`.
+    #[deluxe(default = Ident::new("Self", Span::call_site()))]
+    pub insert_input_ty: Ident,
+    /// For `#[derive(Table)]`: changes the declared lifetime parameter
+    /// of the  `InsertInput` associated type from the default `'p`.
+    #[deluxe(default = syn::parse_quote!('p))]
+    pub insert_input_lt: Lifetime,
 }
 
 /// Represents the allowed (and compulsory) first character of a parameter

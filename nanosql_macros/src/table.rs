@@ -41,36 +41,39 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
 
 pub fn expand_struct(
     input: &DeriveInput,
-    _attrs: ContainerAttributes,
+    attrs: ContainerAttributes,
     fields: &FieldsNamed,
 ) -> Result<TokenStream, Error> {
     let ty_name = &input.ident;
     let ty_name_str = ty_name.unraw().to_string();
+    let insert_input_ty = attrs.insert_input_ty;
+    let insert_input_lt = attrs.insert_input_lt;
 
     let col_name_str = fields.named.iter().map(|f| {
         f.ident.as_ref().expect("named field is unnamed?").unraw().to_string()
     });
     let col_ty = fields.named.iter().map(|f| &f.ty);
 
+    let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
+
     Ok(quote!{
-        impl ::nanosql::Table for #ty_name {
-            type InsertInput<'p> = Self;
+        impl<#impl_gen> ::nanosql::Table<#ty_gen> for #ty_name #where_clause {
+            type InsertInput<#insert_input_lt> = #insert_input_ty;
 
             fn description() -> ::nanosql::TableDesc {
-                ::nanosql::TableDesc::new(#ty_name_str)
-                    #(
-                        .column(
-                            ::nanosql::Column::new(#col_name_str)
-                                .ty(<#col_ty as ::nanosql::AsSqlTy>::SQL_TY)
-                                .check(
-                                    ::std::string::ToString::to_string(
-                                        &::nanosql::table::ColumnConstraintFormatter::<#col_ty>::new(
-                                            #col_name_str
-                                        )
+                ::nanosql::TableDesc::new(#ty_name_str) #(
+                    .column(
+                        ::nanosql::Column::new(#col_name_str)
+                            .ty(<#col_ty as ::nanosql::AsSqlTy>::SQL_TY)
+                            .check(
+                                ::std::string::ToString::to_string(
+                                    &::nanosql::table::ColumnConstraintFormatter::<#col_ty>::new(
+                                        #col_name_str
                                     )
                                 )
-                        )
-                    )*
+                            )
+                    )
+                )*
             }
         }
     })
