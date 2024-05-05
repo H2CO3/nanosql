@@ -6,6 +6,8 @@ use std::error::Error as StdError;
 use std::borrow::Cow;
 use rusqlite::{Error as SqlError, types::FromSqlError};
 use thiserror::Error;
+#[cfg(feature = "not-nan")]
+use ordered_float::FloatIsNan;
 
 
 /// NanoSQL errors.
@@ -23,6 +25,10 @@ pub enum Error {
 
     #[error("SQL conversion error: {0}")]
     FromSql(#[from] FromSqlError),
+
+    #[cfg(feature = "not-nan")]
+    #[error(transparent)]
+    Nan(#[from] FloatIsNan),
 
     #[error("query expects {expected} parameters but {actual} were bound")]
     ParamCountMismatch {

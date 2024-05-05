@@ -1,13 +1,30 @@
 //! Utility queries for common tasks: `CREATE TABLE`, `INSERT`, etc.
 
 use core::marker::PhantomData;
+use core::num::{
+    NonZeroI8,
+    NonZeroU8,
+    NonZeroI16,
+    NonZeroU16,
+    NonZeroI32,
+    NonZeroU32,
+    NonZeroI64,
+    NonZeroU64,
+    NonZeroIsize,
+    NonZeroUsize,
+};
 use core::fmt::{self, Display, Debug, Formatter, Write};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
+use std::rc::Rc;
+use std::sync::Arc;
 use crate::{
     query::Query,
     param::{Param, ParamPrefix},
     error::Result,
 };
+#[cfg(feature = "not-nan")]
+use ordered_float::NotNan;
 
 
 /// Implemented by UDTs that map to an SQL table.
@@ -85,6 +102,57 @@ impl TableDesc {
     pub fn constrain(mut self, constraint: TableConstraint) -> Self {
         self.constraints.insert(constraint);
         self
+    }
+
+    /// Marks some columns as a primary key.
+    pub fn pk<I>(self, columns: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        self.constrain(TableConstraint::PrimaryKey {
+            columns: columns.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    /// Adds a multi-column foreign key constraint.
+    /// The iterator must return columns in pairs,
+    /// where the first item is a column in this table,
+    /// and the second item is a column in the foreign table.
+    pub fn fk<T, I, K1, K2>(self, table: T, columns: I) -> Self
+    where
+        T: Into<String>,
+        I: IntoIterator<Item = (K1, K2)>,
+        K1: Into<String>,
+        K2: Into<String>,
+    {
+        let column_pairs = columns
+            .into_iter()
+            .map(|(own, foreign)| (own.into(), foreign.into()))
+            .collect();
+
+        self.constrain(TableConstraint::ForeignKey {
+            table: table.into(),
+            column_pairs,
+        })
+    }
+
+    /// Marks some columns as unique when considered together.
+    pub fn unique<I>(self, columns: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Into<String>,
+    {
+        self.constrain(TableConstraint::Unique {
+            columns: columns.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    /// Adds an arbitrary, table-level `CHECK` constraint.
+    pub fn check(self, condition: impl Into<String>) -> Self {
+        self.constrain(TableConstraint::Check {
+            condition: condition.into(),
+        })
     }
 }
 
@@ -164,9 +232,13 @@ impl Column {
 
     /// Enforces that an arbitrary boolean predicate is true.
     pub fn check(self, condition: impl Into<String>) -> Self {
-        self.constrain(ColumnConstraint::Check {
-            condition: condition.into(),
-        })
+        let condition = condition.into();
+
+        if condition.is_empty() {
+            self
+        } else {
+            self.constrain(ColumnConstraint::Check { condition })
+        }
     }
 }
 
@@ -347,6 +419,24 @@ pub enum TableConstraint {
         /// The columns in this table that together constitute its composite primary key.
         columns: Vec<String>,
     },
+    /// A list of columns corresponding to some other columns in another table.
+    ForeignKey {
+        /// The foreign table being referenced.
+        table: String,
+        /// The corresponding pairs of columns that make up the key in the tables.
+        column_pairs: Vec<(String, String)>,
+    },
+    /// A multi-column uniqueness constraint.
+    Unique {
+        /// The columns in this table of which tuples must be unique.
+        columns: Vec<String>,
+    },
+    /// An arbitrary `CHECK` constraint ensuring that an SQL expression
+    /// depending on some or all columns of the table is `TRUE`.
+    Check {
+        /// The SQL expression that must evaluate to true.
+        condition: String,
+    },
 }
 
 impl Display for TableConstraint {
@@ -357,13 +447,197 @@ impl Display for TableConstraint {
 
                 let mut sep = "";
                 for col in columns {
-                    write!(formatter, "{sep}{col}")?;
+                    write!(formatter, r#"{sep}"{col}""#)?;
                     sep = ", ";
                 }
 
                 formatter.write_char(')')
             }
+            TableConstraint::ForeignKey { table, column_pairs } => {
+                write!(formatter, "FOREIGN KEY(")?;
+
+                let mut sep = "";
+                for (own_col, _) in column_pairs {
+                    write!(formatter, r#"{sep}"{own_col}""#)?;
+                    sep = ", ";
+                }
+
+                write!(formatter, r#") REFERENCES "{table}"("#)?;
+
+                sep = "";
+                for (_, foreign_col) in column_pairs {
+                    write!(formatter, r#"{sep}"{foreign_col}""#)?;
+                    sep = ", ";
+                }
+
+                formatter.write_char(')')
+            }
+            TableConstraint::Unique { columns } => {
+                formatter.write_str("UNIQUE(")?;
+
+                let mut sep = "";
+                for col in columns {
+                    write!(formatter, r#"{sep}"{col}""#)?;
+                    sep = ", ";
+                }
+
+                formatter.write_char(')')
+            }
+            TableConstraint::Check { condition } => {
+                write!(formatter, "CHECK ({condition})")
+            }
         }
+    }
+}
+
+/// A trait that associates Rust types with their SQL counterpart.
+pub trait AsSqlTy {
+    /// The SQL type corresponding to this type.
+    const SQL_TY: SqlTy;
+
+    /// If the domain of this type requires a CHECK constraint,
+    /// this method should write out the relevant criteria. The
+    /// column name will be given as the `column` argument. If
+    /// the body of this function doesn't write anything to the
+    /// formatter, no `CHECK` constraint is going to be emitted.
+    ///
+    /// The default implementation does nothing.
+    fn format_check_constraint(column: &dyn Display, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let _ = column;
+        let _ = formatter;
+
+        Ok(())
+    }
+}
+
+macro_rules! impl_as_sql_ty_for_primitive {
+    ($($rust_ty:ty => $sql_ty:expr,)*) => {$(
+        impl AsSqlTy for $rust_ty {
+            const SQL_TY: SqlTy = $sql_ty;
+        }
+    )*}
+}
+
+impl_as_sql_ty_for_primitive!{
+    i8      => SqlTy::new(TyPrim::Integer),
+    i16     => SqlTy::new(TyPrim::Integer),
+    i32     => SqlTy::new(TyPrim::Integer),
+    i64     => SqlTy::new(TyPrim::Integer),
+    isize   => SqlTy::new(TyPrim::Integer),
+    u8      => SqlTy::new(TyPrim::Integer),
+    u16     => SqlTy::new(TyPrim::Integer),
+    u32     => SqlTy::new(TyPrim::Integer),
+    u64     => SqlTy::new(TyPrim::Integer),
+    usize   => SqlTy::new(TyPrim::Integer),
+    f32     => SqlTy::nullable(TyPrim::Real),
+    f64     => SqlTy::nullable(TyPrim::Real),
+    str     => SqlTy::new(TyPrim::Text),
+    String  => SqlTy::new(TyPrim::Text),
+    [u8]    => SqlTy::new(TyPrim::Blob),
+    Vec<u8> => SqlTy::new(TyPrim::Blob),
+}
+
+macro_rules! impl_as_sql_ty_for_non_zero {
+    ($($ty:ty,)*) => {$(
+        impl AsSqlTy for $ty {
+            const SQL_TY: SqlTy = SqlTy::new(TyPrim::Integer);
+
+            fn format_check_constraint(
+                column: &dyn Display,
+                formatter: &mut Formatter<'_>,
+            ) -> fmt::Result {
+                write!(formatter, "{column} != 0")
+            }
+        }
+    )*}
+}
+
+impl_as_sql_ty_for_non_zero!{
+    NonZeroI8,
+    NonZeroU8,
+    NonZeroI16,
+    NonZeroU16,
+    NonZeroI32,
+    NonZeroU32,
+    NonZeroI64,
+    NonZeroU64,
+    NonZeroIsize,
+    NonZeroUsize,
+}
+
+impl AsSqlTy for bool {
+    const SQL_TY: SqlTy = SqlTy::new(TyPrim::Integer);
+
+    fn format_check_constraint(column: &dyn Display, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{column} IN (0, 1)")
+    }
+}
+
+#[cfg(feature = "not-nan")]
+impl AsSqlTy for NotNan<f32> {
+    const SQL_TY: SqlTy = SqlTy::new(TyPrim::Real);
+}
+
+#[cfg(feature = "not-nan")]
+impl AsSqlTy for NotNan<f64> {
+    const SQL_TY: SqlTy = SqlTy::new(TyPrim::Real);
+}
+
+impl<const N: usize> AsSqlTy for [u8; N] {
+    const SQL_TY: SqlTy = SqlTy::new(TyPrim::Blob);
+}
+
+impl<T: AsSqlTy> AsSqlTy for Option<T> {
+    const SQL_TY: SqlTy = T::SQL_TY.as_nullable();
+}
+
+impl<T: ?Sized + AsSqlTy> AsSqlTy for &T {
+    const SQL_TY: SqlTy = T::SQL_TY;
+}
+
+impl<T: ?Sized + AsSqlTy> AsSqlTy for &mut T {
+    const SQL_TY: SqlTy = T::SQL_TY;
+}
+
+impl<T: ?Sized + AsSqlTy> AsSqlTy for Box<T> {
+    const SQL_TY: SqlTy = T::SQL_TY;
+}
+
+impl<T: ?Sized + AsSqlTy> AsSqlTy for Rc<T> {
+    const SQL_TY: SqlTy = T::SQL_TY;
+}
+
+impl<T: ?Sized + AsSqlTy> AsSqlTy for Arc<T> {
+    const SQL_TY: SqlTy = T::SQL_TY;
+}
+
+impl<T> AsSqlTy for Cow<'_, T>
+where
+    T: ?Sized + ToOwned + AsSqlTy
+{
+    const SQL_TY: SqlTy = T::SQL_TY;
+}
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct ColumnConstraintFormatter<'a, T: ?Sized> {
+    name: &'a str,
+    ty: PhantomData<fn() -> &'a T>,
+}
+
+impl<'a, T: ?Sized> ColumnConstraintFormatter<'a, T> {
+    #[doc(hidden)]
+    pub fn new(name: &'a str) -> Self {
+        ColumnConstraintFormatter {
+            name,
+            ty: PhantomData,
+        }
+    }
+}
+
+impl<T: ?Sized + AsSqlTy> Display for ColumnConstraintFormatter<'_, T> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        T::format_check_constraint(&format_args!(r#""{}""#, self.name), formatter)
     }
 }
 

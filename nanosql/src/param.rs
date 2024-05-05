@@ -19,6 +19,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::collections::{HashMap, BTreeMap};
 use rusqlite::{Statement, ToSql, types::{Value, ValueRef, Null, ToSqlOutput}};
+#[cfg(feature = "not-nan")]
+use ordered_float::NotNan;
 use crate::error::{Error, Result};
 
 
@@ -173,6 +175,26 @@ impl_param_for_primitive!{
     Value,
     ToSqlOutput<'_>,
     Null,
+}
+
+#[cfg(feature = "not-nan")]
+impl Param for NotNan<f32> {
+    /// Primitives are bound as positional parameters, hence the prefix is '?'
+    const PREFIX: ParamPrefix = ParamPrefix::Question;
+
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        bind_primitive(statement, self.into_inner())
+    }
+}
+
+#[cfg(feature = "not-nan")]
+impl Param for NotNan<f64> {
+    /// Primitives are bound as positional parameters, hence the prefix is '?'
+    const PREFIX: ParamPrefix = ParamPrefix::Question;
+
+    fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
+        bind_primitive(statement, self.into_inner())
+    }
 }
 
 impl Param for ValueRef<'_> {

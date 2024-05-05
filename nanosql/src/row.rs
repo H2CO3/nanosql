@@ -20,6 +20,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::collections::{VecDeque, BinaryHeap, HashSet, HashMap, BTreeSet, BTreeMap};
 use rusqlite::{Statement, Row, Rows, types::{Value, ToSqlOutput, FromSql}};
+#[cfg(feature = "not-nan")]
+use ordered_float::NotNan;
 use crate::error::{Error, Result, RowCount};
 
 
@@ -245,7 +247,6 @@ pub trait ResultRecord: Sized {
     fn from_row(row: &Row<'_>) -> Result<Self>;
 }
 
-
 /// Private helper for ensuring that exactly 1 column is found when
 /// building a strongly-typed tuple from a dynamically-typed `Row`.
 fn primitive_from_sql<T: FromSql>(row: &Row<'_>) -> Result<T> {
@@ -395,6 +396,24 @@ impl ResultRecord for Box<[u8]> {
 impl ResultRecord for ToSqlOutput<'_> {
     fn from_row(row: &Row<'_>) -> Result<Self> {
         primitive_from_sql(row).map(ToSqlOutput::Owned)
+    }
+}
+
+#[cfg(feature = "not-nan")]
+impl ResultRecord for NotNan<f32> {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        let x: f32 = primitive_from_sql(row)?;
+        let value = NotNan::try_from(x)?;
+        Ok(value)
+    }
+}
+
+#[cfg(feature = "not-nan")]
+impl ResultRecord for NotNan<f64> {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        let x: f64 = primitive_from_sql(row)?;
+        let value = NotNan::try_from(x)?;
+        Ok(value)
     }
 }
 
