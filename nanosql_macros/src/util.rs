@@ -2,7 +2,7 @@ use core::fmt::{self, Display, Formatter, Write};
 use std::collections::HashSet;
 use proc_macro::TokenStream as TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
-use syn::{Error, Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit, Lifetime};
+use syn::{Error, Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit, Type, Lifetime};
 use syn::parse_quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
@@ -64,11 +64,11 @@ pub struct ContainerAttributes {
     #[deluxe(alias = prefix, alias = param_pfx)]
     pub param_prefix: Option<ParamPrefix>,
     /// For `#[derive(Table)]`: changes the `InsertInput` associated type from `Self`.
-    #[deluxe(default = Ident::new("Self", Span::call_site()))]
-    pub insert_input_ty: Ident,
+    #[deluxe(default = parse_quote!(Self))]
+    pub insert_input_ty: Type,
     /// For `#[derive(Table)]`: changes the declared lifetime parameter
     /// of the  `InsertInput` associated type from the default `'p`.
-    #[deluxe(default = syn::parse_quote!('p))]
+    #[deluxe(default = parse_quote!('p))]
     pub insert_input_lt: Lifetime,
 }
 

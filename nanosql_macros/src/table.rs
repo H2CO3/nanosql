@@ -7,6 +7,8 @@ use crate::util::ContainerAttributes;
 
 
 /// TODO(H2CO3): handle generics?
+/// TODO(H2CO3): handle various field-level and table-level attributes such as:
+/// rename(_all), skip, PK, FK, unique, check, default, generated, etc.
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
     let attrs: ContainerAttributes = deluxe::parse_attributes(&input)?;
@@ -28,7 +30,6 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
                     ))
                 }
             }
-
         }
         Data::Enum(_) => {
             Err(Error::new_spanned(&input, "#[derive(Table)] is not supported for enums"))
