@@ -589,26 +589,69 @@ impl<const N: usize> AsSqlTy for [u8; N] {
 
 impl<T: AsSqlTy> AsSqlTy for Option<T> {
     const SQL_TY: SqlTy = T::SQL_TY.as_nullable();
+
+    fn format_check_constraint(
+        column: &dyn Display,
+        formatter: &mut Formatter<'_>,
+    ) -> fmt::Result {
+        // no need to add a special case for NULL as it's ignored by CHECK constraints
+        T::format_check_constraint(column, formatter)
+    }
 }
 
 impl<T: ?Sized + AsSqlTy> AsSqlTy for &T {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    fn format_check_constraint(
+        column: &dyn Display,
+        formatter: &mut Formatter<'_>,
+    ) -> fmt::Result {
+        T::format_check_constraint(column, formatter)
+    }
 }
 
 impl<T: ?Sized + AsSqlTy> AsSqlTy for &mut T {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    fn format_check_constraint(
+        column: &dyn Display,
+        formatter: &mut Formatter<'_>,
+    ) -> fmt::Result {
+        T::format_check_constraint(column, formatter)
+    }
 }
 
 impl<T: ?Sized + AsSqlTy> AsSqlTy for Box<T> {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    fn format_check_constraint(
+        column: &dyn Display,
+        formatter: &mut Formatter<'_>,
+    ) -> fmt::Result {
+        T::format_check_constraint(column, formatter)
+    }
 }
 
 impl<T: ?Sized + AsSqlTy> AsSqlTy for Rc<T> {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    fn format_check_constraint(
+        column: &dyn Display,
+        formatter: &mut Formatter<'_>,
+    ) -> fmt::Result {
+        T::format_check_constraint(column, formatter)
+    }
 }
 
 impl<T: ?Sized + AsSqlTy> AsSqlTy for Arc<T> {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    fn format_check_constraint(
+        column: &dyn Display,
+        formatter: &mut Formatter<'_>,
+    ) -> fmt::Result {
+        T::format_check_constraint(column, formatter)
+    }
 }
 
 impl<T> AsSqlTy for Cow<'_, T>
@@ -616,6 +659,13 @@ where
     T: ?Sized + ToOwned + AsSqlTy
 {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    fn format_check_constraint(
+        column: &dyn Display,
+        formatter: &mut Formatter<'_>,
+    ) -> fmt::Result {
+        T::format_check_constraint(column, formatter)
+    }
 }
 
 #[doc(hidden)]
