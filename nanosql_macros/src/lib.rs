@@ -5,6 +5,7 @@ mod result_record;
 mod table;
 mod to_sql;
 mod from_sql;
+mod as_sql_ty;
 mod util;
 
 
@@ -35,4 +36,9 @@ pub fn derive_to_sql(ts: TokenStream) -> TokenStream {
 #[proc_macro_derive(FromSql, attributes(nanosql))]
 pub fn derive_from_sql(ts: TokenStream) -> TokenStream {
     util::expand(ts, from_sql::expand)
+}
+
+#[proc_macro_derive(AsSqlTy, attributes(nanosql))]
+pub fn derive_as_sql_ty(ts: TokenStream) -> TokenStream {
+    util::expand(ts, as_sql_ty::expand)
 }

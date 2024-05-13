@@ -29,7 +29,7 @@ The absolute basics - create a table, insert a bunch of records into it, then re
 ```rust
 use nanosql::{
     Result, Connection, ConnectionExt, Query,
-    ToSql, FromSql, Param, ResultRecord, Table
+    ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table
 };
 
 
@@ -55,15 +55,11 @@ struct Pet {
     kind: PetKind,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, ToSql, FromSql)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, ToSql, FromSql, AsSqlTy)]
 enum PetKind {
     Dog,
     Cat,
     Fish,
-}
-
-impl nanosql::AsSqlTy for PetKind {
-    const SQL_TY: nanosql::SqlTy = nanosql::SqlTy::new(nanosql::TyPrim::Text);
 }
 
 /// Our first custom query retrieves a pet by its unique ID.

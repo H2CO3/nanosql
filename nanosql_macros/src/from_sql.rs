@@ -1,7 +1,8 @@
-use proc_macro2::{TokenStream, Ident};
+use proc_macro2::TokenStream;
 use syn::Error;
 use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields};
 use syn::parse_quote;
+use syn::ext::IdentExt;
 use quote::quote;
 use crate::util::{add_bounds, ContainerAttributes};
 
@@ -14,7 +15,7 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
         Data::Struct(data) => expand_struct(&input, attrs, data),
         Data::Enum(data) => expand_enum(&input, attrs, data),
         Data::Union(_) => {
-            return Err(Error::new_spanned(&input, "#[derive(FromSql)] is not supported for unions"));
+            Err(Error::new_spanned(&input, "#[derive(FromSql)] is not supported for unions"))
         }
     }
 }
@@ -32,7 +33,7 @@ fn expand_struct(
         Fields::Unnamed(fields) => &fields.unnamed,
         Fields::Unit => {
             return Err(Error::new_spanned(
-                &input,
+                input,
                 "#[derive(FromSql)] is not supported for unit structs"
             ));
         }
@@ -42,7 +43,7 @@ fn expand_struct(
 
     let (Some(field), None) = (iter.next(), iter.next()) else {
         return Err(Error::new_spanned(
-            &fields,
+            fields,
             "deriving `FromSql` on a struct is only allowed for a newtype with exactly one field"
         ));
     };
@@ -94,9 +95,9 @@ fn expand_enum(
         .collect::<Result<_, _>>()?;
 
     // TODO(H2CO3): respect renaming attributes here
-    let variant_strings: Vec<_> = variant_names.iter().copied().map(Ident::to_string).collect();
+    let variant_strings: Vec<_> = variant_names.iter().map(|v| v.unraw().to_string()).collect();
     let ty_name = &input.ident;
-    let ty_name_str = ty_name.to_string();
+    let ty_name_str = ty_name.unraw().to_string();
 
     // we don't need to handle generics from fields of variants,
     // because we only accept unit variants anyway

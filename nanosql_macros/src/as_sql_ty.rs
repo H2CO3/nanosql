@@ -1,4 +1,4 @@
-use proc_macro2::{TokenStream, TokenTree, Literal};
+use proc_macro2::TokenStream;
 use syn::Error;
 use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields};
 use syn::parse_quote;
@@ -15,7 +15,7 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
         Data::Struct(data) => expand_struct(&input, attrs, data),
         Data::Enum(data) => expand_enum(&input, attrs, data),
         Data::Union(_) => {
-            Err(Error::new_spanned(&input, "#[derive(ToSql)] is not supported for unions"))
+            Err(Error::new_spanned(&input, "#[derive(AsSqlTy)] is not supported for unions"))
         }
     }
 }
@@ -34,7 +34,7 @@ fn expand_struct(
         Fields::Unit => {
             return Err(Error::new_spanned(
                 input,
-                "#[derive(ToSql)] is not supported for unit structs"
+                "#[derive(AsSqlTy)] is not supported for unit structs"
             ));
         }
     };
@@ -44,22 +44,24 @@ fn expand_struct(
     let (Some(field), None) = (iter.next(), iter.next()) else {
         return Err(Error::new_spanned(
             fields,
-            "deriving `ToSql` on a struct is only allowed for a newtype with exactly one field"
+            "deriving `AsSqlTy` on a struct is only allowed for a newtype with exactly one field"
         ));
     };
     let ty_name = &input.ident;
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
-    let bounds = parse_quote!(::nanosql::ToSql);
+    let bounds = parse_quote!(::nanosql::AsSqlTy);
     let where_clause = add_bounds(&data.fields, where_clause, bounds)?;
-    let field_name = field.ident.clone().map_or(
-        TokenTree::Literal(Literal::usize_unsuffixed(0)),
-        TokenTree::Ident,
-    );
+    let field_ty = &field.ty;
 
     Ok(quote!{
-        impl #impl_gen ::nanosql::ToSql for #ty_name #ty_gen #where_clause {
-            fn to_sql(&self) -> ::nanosql::rusqlite::Result<::nanosql::ToSqlOutput> {
-                ::nanosql::ToSql::to_sql(&self.#field_name)
+        impl #impl_gen ::nanosql::AsSqlTy for #ty_name #ty_gen #where_clause {
+            const SQL_TY: ::nanosql::SqlTy = <#field_ty as ::nanosql::AsSqlTy>::SQL_TY;
+
+            fn format_check_constraint(
+                column: &dyn ::std::fmt::Display,
+                formatter: &mut ::std::fmt::Formatter<'_>,
+            ) -> ::std::fmt::Result {
+                <#field_ty as ::nanosql::AsSqlTy>::format_check_constraint(column, formatter)
             }
         }
     })
@@ -70,22 +72,25 @@ fn expand_enum(
     _attrs: ContainerAttributes,
     data: &DataEnum,
 ) -> Result<TokenStream, Error> {
-    let variant_names: Vec<_> = data.variants
+    let variant_list = data.variants
         .iter()
-        .map(|v| {
+        .enumerate()
+        .map(|(i, v)| {
             if matches!(v.fields, Fields::Unit) {
-                Ok(&v.ident)
+                let sep = if i == 0 { "" } else { ", " };
+                let var = v.ident.unraw();
+
+                // TODO(H2CO3): respect renaming attributes here
+                Ok(format!("{sep}'{var}'"))
             } else {
                 Err(Error::new_spanned(
                     v,
-                    "ToSql can only be derived on enums with all unit variants"
+                    "AsSqlTy can only be derived on enums with all unit variants"
                 ))
             }
         })
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<String, _>>()?;
 
-    // TODO(H2CO3): respect renaming attributes here
-    let variant_strings: Vec<_> = variant_names.iter().map(|v| v.unraw().to_string()).collect();
     let ty_name = &input.ident;
 
     // we don't need to handle generics from fields of variants,
@@ -93,12 +98,16 @@ fn expand_enum(
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
     Ok(quote!{
-        impl #impl_gen ::nanosql::ToSql for #ty_name #ty_gen #where_clause {
-            fn to_sql(&self) -> ::nanosql::rusqlite::Result<::nanosql::ToSqlOutput> {
-                let variant_name = match *self {
-                    #(#ty_name::#variant_names => #variant_strings,)*
-                };
-                ::nanosql::ToSql::to_sql(variant_name)
+        impl #impl_gen ::nanosql::AsSqlTy for #ty_name #ty_gen #where_clause {
+            const SQL_TY: ::nanosql::SqlTy = ::nanosql::SqlTy::new(::nanosql::TyPrim::Text);
+
+            fn format_check_constraint(
+                column: &dyn ::std::fmt::Display,
+                formatter: &mut ::std::fmt::Formatter<'_>,
+            ) -> ::std::fmt::Result {
+                use ::std::fmt::Write;
+
+                ::std::write!(formatter, "{column} IN ({list})", list = #variant_list)
             }
         }
     })

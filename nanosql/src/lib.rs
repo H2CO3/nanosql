@@ -30,4 +30,4 @@ pub use error::{Error, Result};
 pub use ordered_float::NotNan;
 
 #[cfg(feature = "derive")]
-pub use nanosql_macros::{Param, ResultRecord, Table, ToSql, FromSql};
+pub use nanosql_macros::{ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table};
