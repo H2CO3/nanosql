@@ -16,7 +16,7 @@ pub extern crate rusqlite;
 
 pub use rusqlite::{
     Connection, Statement, Rows, Row,
-    types::{self, ToSql, FromSql, Value, ValueRef, ToSqlOutput},
+    types::{self, ToSql, FromSql, Value, ValueRef, ToSqlOutput, FromSqlResult},
 };
 pub use query::Query;
 pub use table::{Table, TableDesc, Column, SqlTy, TyPrim, AsSqlTy, Create, Insert};
@@ -30,4 +30,4 @@ pub use error::{Error, Result};
 pub use ordered_float::NotNan;
 
 #[cfg(feature = "derive")]
-pub use nanosql_macros::{Param, ResultRecord, Table};
+pub use nanosql_macros::{Param, ResultRecord, Table, ToSql, FromSql};

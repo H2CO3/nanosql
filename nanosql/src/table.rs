@@ -27,7 +27,12 @@ use crate::{
 use ordered_float::NotNan;
 
 
-/// Implemented by UDTs that map to an SQL table.
+/// Implemented by UDTs that map to an SQL table. This is a convenience helper trait
+/// for enabling automatic generation of `CREATE TABLE` and `INSERT` statements; it
+/// is not strictly necessary for using the table type as a parameter set or a result
+/// tuple. That functionality is provided by the `Param` and `ResultRecord` traits.
+///
+/// This trait can be automatically derived on `struct`s with named fields.
 pub trait Table {
     /// The parameter set bound to an `INSERT` statement inserting into this table.
     /// In simple cases, it can be `Self`. For a more efficient implementation (no
@@ -491,6 +496,14 @@ impl Display for TableConstraint {
 }
 
 /// A trait that associates Rust types with their SQL counterpart.
+///
+/// This must be implemented by atomic/primitive column (field)
+/// types of a `struct`, for deriving `Table` automatically. Usually,
+/// to be useful with `#[derive]`, a type that impls `AsSqlTy` must
+/// also impl `ToSql` and `FromSql`.
+///
+/// This trait can be automatically derived on `enum`s with only unit
+/// variants, and on newtype structs, along with `ToSql` and `FromSql`.
 pub trait AsSqlTy {
     /// The SQL type corresponding to this type.
     const SQL_TY: SqlTy;
@@ -765,6 +778,7 @@ impl<T: Table> Query for Insert<T> {
     type Input<'p> = T::InsertInput<'p>;
     type Output = ();
 
+    /// TODO(H2CO3): respect optional/defaulted columns
     fn sql(&self) -> Result<impl AsRef<str> + '_> {
         let desc = T::description();
         let mut sql = format!(r#"INSERT INTO "{}"("#, desc.name);

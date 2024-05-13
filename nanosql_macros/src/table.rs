@@ -40,7 +40,7 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     }
 }
 
-pub fn expand_struct(
+fn expand_struct(
     input: &DeriveInput,
     attrs: ContainerAttributes,
     fields: &FieldsNamed,

@@ -29,7 +29,7 @@ The absolute basics - create a table, insert a bunch of records into it, then re
 ```rust
 use nanosql::{
     Result, Connection, ConnectionExt, Query,
-    Param, ResultRecord, Table, TableDesc, Column, TyPrim
+    ToSql, FromSql, Param, ResultRecord, Table
 };
 
 
@@ -40,29 +40,30 @@ use nanosql::{
 /// and the `ResultRecord` trait so that we can use it to retrieve
 /// results, too.
 ///
+/// We also derive the `Table` trait so that basic operations such as
+/// creating the table in the schema and bulk insertion can be performed
+/// using the appropriate convenience methods in [`ConnectionExt`].
+///
 /// The parameter prefix is '$' by default (if not specified via the
 /// param_prefix attribute); it may also be one of ':', '@', or '?',
 /// the last one being allowed only for tuples and scalar parameters.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Param, ResultRecord)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Param, ResultRecord, Table)]
 #[nanosql(param_prefix = '$')] // optional
 struct Pet {
     id: i64,
     name: String,
-    kind: String,
+    kind: PetKind,
 }
 
-/// The `Table` trait informs the `ConnectionExt::create_table()` and `ConnectionExt::insert_batch()`
-/// functions as to how creating the table and inserting records works.
-impl Table for Pet {
-    /// In the simplest case, the input of an `INSERT` is just a record of the table type.
-    type InsertInput<'p> = Self;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, ToSql, FromSql)]
+enum PetKind {
+    Dog,
+    Cat,
+    Fish,
+}
 
-    fn description() -> TableDesc {
-        TableDesc::new("pet")
-            .column(Column::new("id").ty(TyPrim::Integer).pk())
-            .column(Column::new("name").ty(TyPrim::Text))
-            .column(Column::new("kind").ty(TyPrim::Text))
-    }
+impl nanosql::AsSqlTy for PetKind {
+    const SQL_TY: nanosql::SqlTy = nanosql::SqlTy::new(nanosql::TyPrim::Text);
 }
 
 /// Our first custom query retrieves a pet by its unique ID.
@@ -100,17 +101,17 @@ fn main() -> Result<()> {
         Pet {
             id: 1,
             name: "Fluffy".into(),
-            kind: "dog".into(),
+            kind: PetKind::Dog,
         },
         Pet {
             id: 2,
             name: "Hello Kitty".into(),
-            kind: "cat".into(),
+            kind: PetKind::Cat,
         },
         Pet {
             id: 3,
             name: "Nemo".into(),
-            kind: "fish".into(),
+            kind: PetKind::Fish,
         },
     ])?;
 
@@ -122,7 +123,7 @@ fn main() -> Result<()> {
     assert_eq!(result, Some(Pet { 
         id: 3,
         name: "Nemo".into(), 
-        kind: "fish".into(),
+        kind: PetKind::Fish,
     }));
 
     // We can re-use the statement and execute it multiple times

@@ -42,7 +42,7 @@ fn expand_struct(
     Ok(quote!{
         impl #impl_gen ::nanosql::ResultRecord for #ty_name #ty_gen #where_clause {
             fn from_row(row: &::nanosql::Row<'_>) -> ::nanosql::Result<Self> {
-                let statement: &nanosql::Statement = row.as_ref();
+                let statement: &::nanosql::Statement = row.as_ref();
                 let actual = statement.column_count();
                 let expected = #num_fields;
 
