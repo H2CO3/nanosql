@@ -74,7 +74,7 @@ where
 /// The invocation looks like the following:
 ///
 /// ```ignore
-/// declare_query!{
+/// define_query!{
 ///     QueryName<'lt>: InputType<'lt> => OutputType { "SQL (impl AsRef<str>)" }
 /// }
 /// ```
@@ -91,7 +91,7 @@ where
 /// Example:
 ///
 /// ```rust
-/// # use nanosql::{Result, Connection, ConnectionExt, Param, Row, ResultRecord};
+/// # use nanosql::{Result, Connection, ConnectionExt, Param, ResultRecord, Table};
 /// #[derive(Clone, Copy, Debug, Param)]
 /// #[nanosql(param_prefix = '@')]
 /// struct YoungEmployeesByNameParams<'n> {
@@ -99,19 +99,12 @@ where
 ///     max_age: usize,
 /// }
 ///
-/// #[derive(Clone, Default, Debug)]
+/// #[derive(Clone, Default, Debug, Param, ResultRecord, Table)]
 /// struct Employee {
 ///     id: u64,
 ///     name: String,
 ///     age: usize,
 ///     boss_id: u64,
-/// }
-///
-/// impl ResultRecord for Employee {
-///     // (uninteresting details hidden)
-/// #     fn from_row(_: &Row<'_>) -> Result<Self> {
-/// #         Ok(Employee::default())
-/// #     }
 /// }
 ///
 /// nanosql::define_query! {
@@ -122,19 +115,44 @@ where
 ///
 ///     // A more involved query that uses the domain types defined above.
 ///     pub(crate) YoungEmployeesByName<'p>: YoungEmployeesByNameParams<'p> => Vec<Employee> {
-/// # /*
 ///         r#"
 ///         SELECT id, name, age, boss_id
 ///         FROM employee
 ///         WHERE name LIKE @name AND age <= @max_age
 ///         "#
-/// # */
-/// #       "VALUES (@name), (@max_age)" // so that the query returns some rows and uses 2 params
 ///     }
 /// }
 ///
 /// fn main() -> Result<()> {
-///     let conn = Connection::open_in_memory()?;
+///     let mut conn = Connection::open_in_memory()?;
+/// #
+/// #   conn.create_table::<Employee>()?;
+/// #   conn.insert_batch([
+/// #       Employee {
+/// #           id: 1,
+/// #           name: "Alice".into(),
+/// #           age: 18,
+/// #           boss_id: 0,
+/// #       },
+/// #       Employee {
+/// #           id: 1,
+/// #           name: "Joe".into(),
+/// #           age: 19,
+/// #           boss_id: 0,
+/// #       },
+/// #       Employee {
+/// #           id: 1,
+/// #           name: "Joe".into(),
+/// #           age: 20,
+/// #           boss_id: 0,
+/// #       },
+/// #       Employee {
+/// #           id: 1,
+/// #           name: "Joe".into(),
+/// #           age: 22,
+/// #           boss_id: 0,
+/// #       },
+/// #   ])?;
 ///
 ///     // Compile the query
 ///     let mut stmt = conn.compile(YoungEmployeesByName)?;
