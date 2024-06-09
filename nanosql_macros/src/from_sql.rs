@@ -4,7 +4,7 @@ use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields};
 use syn::parse_quote;
 use syn::ext::IdentExt;
 use quote::quote;
-use crate::util::{add_bounds, ContainerAttributes};
+use crate::util::{add_bounds, ContainerAttributes, FieldAttributes};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
@@ -77,12 +77,13 @@ fn expand_struct(
 
 fn expand_enum(
     input: &DeriveInput,
-    _attrs: ContainerAttributes,
+    attrs: ContainerAttributes,
     data: &DataEnum,
 ) -> Result<TokenStream, Error> {
     let variant_names: Vec<_> = data.variants
         .iter()
         .map(|v| {
+
             if matches!(v.fields, Fields::Unit) {
                 Ok(&v.ident)
             } else {
@@ -94,8 +95,17 @@ fn expand_enum(
         })
         .collect::<Result<_, _>>()?;
 
-    // TODO(H2CO3): respect renaming attributes here
-    let variant_strings: Vec<_> = variant_names.iter().map(|v| v.unraw().to_string()).collect();
+    let variant_strings: Vec<_> = data.variants
+        .iter()
+        .map(|v| {
+            let var_attrs: FieldAttributes = deluxe::parse_attributes(v)?;
+            let var_name = var_attrs.rename.unwrap_or_else(|| {
+                attrs.rename_all.display(v.ident.unraw()).to_string()
+            });
+            Ok(var_name)
+        })
+        .collect::<Result<_, Error>>()?;
+
     let ty_name = &input.ident;
     let ty_name_str = ty_name.unraw().to_string();
 

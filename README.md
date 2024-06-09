@@ -58,8 +58,10 @@ struct Pet {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, ToSql, FromSql, AsSqlTy)]
+#[nanosql(rename_all = "UPPER_SNAKE_CASE")]
 enum PetKind {
     Dog,
+    #[nanosql(rename = "KITTEN")]
     Cat,
     Fish,
 }

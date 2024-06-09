@@ -4,7 +4,7 @@ use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields};
 use syn::parse_quote;
 use syn::ext::IdentExt;
 use quote::quote;
-use crate::util::{add_bounds, ContainerAttributes};
+use crate::util::{add_bounds, ContainerAttributes, FieldAttributes};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
@@ -69,18 +69,21 @@ fn expand_struct(
 
 fn expand_enum(
     input: &DeriveInput,
-    _attrs: ContainerAttributes,
+    attrs: ContainerAttributes,
     data: &DataEnum,
 ) -> Result<TokenStream, Error> {
     let variant_list = data.variants
         .iter()
         .enumerate()
         .map(|(i, v)| {
+            let var_attrs: FieldAttributes = deluxe::parse_attributes(v)?;
+
             if matches!(v.fields, Fields::Unit) {
                 let sep = if i == 0 { "" } else { ", " };
-                let var = v.ident.unraw();
+                let var = var_attrs.rename.unwrap_or_else(|| {
+                    attrs.rename_all.display(v.ident.unraw()).to_string()
+                });
 
-                // TODO(H2CO3): respect renaming attributes here
                 Ok(format!("{sep}'{var}'"))
             } else {
                 Err(Error::new_spanned(
