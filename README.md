@@ -49,9 +49,11 @@ use nanosql::{
 /// the last one being allowed only for tuples and scalar parameters.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Param, ResultRecord, Table)]
 #[nanosql(param_prefix = '$')] // optional
+#[nanosql(rename = "MyLittlePet", rename_all = "lowerCamelCase")]
 struct Pet {
     id: i64,
-    name: String,
+    nick_name: String,
+    #[nanosql(rename = "type")]
     kind: PetKind,
 }
 
@@ -81,7 +83,7 @@ impl Query for PetById {
 
     /// Finally, we create the actual SQL query.
     fn sql(&self) -> Result<impl AsRef<str> + '_> {
-        Ok("SELECT id, name, kind FROM pet WHERE id = ?")
+        Ok("SELECT id, nickName, type FROM MyLittlePet WHERE id = ?")
     }
 }
 
@@ -96,17 +98,17 @@ fn main() -> Result<()> {
     conn.insert_batch([
         Pet {
             id: 1,
-            name: "Fluffy".into(),
+            nick_name: "Fluffy".into(),
             kind: PetKind::Dog,
         },
         Pet {
             id: 2,
-            name: "Hello Kitty".into(),
+            nick_name: "Hello Kitty".into(),
             kind: PetKind::Cat,
         },
         Pet {
             id: 3,
-            name: "Nemo".into(),
+            nick_name: "Nemo".into(),
             kind: PetKind::Fish,
         },
     ])?;
@@ -118,7 +120,7 @@ fn main() -> Result<()> {
     let result = stmt.invoke(3)?;
     assert_eq!(result, Some(Pet { 
         id: 3,
-        name: "Nemo".into(), 
+        nick_name: "Nemo".into(),
         kind: PetKind::Fish,
     }));
 

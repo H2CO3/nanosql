@@ -70,6 +70,22 @@ pub struct ContainerAttributes {
     /// of the  `InsertInput` associated type from the default `'p`.
     #[deluxe(default = parse_quote!('p))]
     pub insert_input_lt: Lifetime,
+    /// For `#[derive(Table)]`: the name of the table itself.
+    pub rename: Option<String>,
+    /// For various macros: rename all fields or variants,
+    /// according to the specified case conversion.
+    #[deluxe(default)]
+    #[deluxe(with = deluxe::with::syn)]
+    pub rename_all: CaseConversion,
+}
+
+/// Attributes on a struct field or an enum variant.
+#[derive(Clone, Debug, ParseAttributes)]
+#[deluxe(attributes(nanosql))]
+pub struct FieldAttributes {
+    /// For various derive macros: parse and serialize the field or variant
+    /// with the given name, instead of the original field or variant name.
+    pub rename: Option<String>,
 }
 
 /// Represents the allowed (and compulsory) first character of a parameter
@@ -162,6 +178,12 @@ impl Parse for ParamPrefix {
     }
 }
 
+impl ParseMetaItem for ParamPrefix {
+    fn parse_meta_item(stream: ParseStream<'_>, _: deluxe::ParseMode) -> Result<Self, Error> {
+        <ParamPrefix as Parse>::parse(stream)
+    }
+}
+
 impl ToTokens for ParamPrefix {
     fn to_tokens(&self, ts: &mut TokenStream2) {
         let variant_name = match *self {
@@ -174,8 +196,75 @@ impl ToTokens for ParamPrefix {
     }
 }
 
-impl ParseMetaItem for ParamPrefix {
-    fn parse_meta_item(stream: ParseStream<'_>, _: deluxe::ParseMode) -> Result<Self, Error> {
-        ParamPrefix::parse(stream)
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub enum CaseConversion {
+    #[default]
+    Identity,
+    LowerSnakeCase,
+    UpperSnakeCase,
+    LowerCamelCase,
+    UpperCamelCase,
+    LowerKebabCase,
+    UpperKebabCase,
+    TitleCase,
+    TrainCase,
+}
+
+impl Parse for CaseConversion {
+    fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
+        let lookahead = stream.lookahead1();
+        if lookahead.peek(syn::LitStr) {
+            stream.parse::<syn::LitStr>()?.parse()
+        } else if lookahead.peek(syn::Ident) {
+            let s = <syn::Ident as syn::ext::IdentExt>::parse_any(stream)?.to_string();
+
+            Ok(match s.as_ref() {
+                "identity" => CaseConversion::Identity,
+                "lower_snake_case" => CaseConversion::LowerSnakeCase,
+                "UPPER_SNAKE_CASE" => CaseConversion::UpperSnakeCase,
+                "lowerCamelCase" => CaseConversion::LowerCamelCase,
+                "UpperCamelCase" => CaseConversion::UpperCamelCase,
+                "lower-kebab-case" => CaseConversion::LowerKebabCase,
+                "UPPER-KEBAB-CASE" => CaseConversion::UpperKebabCase,
+                "Title Case" => CaseConversion::TitleCase,
+                "Train-Case" => CaseConversion::TrainCase,
+                _ => return Err(stream.error("invalid case conversion method")),
+            })
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+
+impl CaseConversion {
+    pub fn display<T>(self, value: T) -> CaseConversionDisplay<T> {
+        CaseConversionDisplay {
+            value,
+            conversion: self,
+        }
+    }
+}
+
+pub struct CaseConversionDisplay<T> {
+    value: T,
+    conversion: CaseConversion,
+}
+
+impl<T: Display> Display for CaseConversionDisplay<T> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        use heck::*;
+        use CaseConversion::*;
+
+        match self.conversion {
+            Identity       => self.value.fmt(formatter),
+            LowerSnakeCase => AsSnakeCase(self.value.to_string()).fmt(formatter),
+            UpperSnakeCase => AsShoutySnakeCase(self.value.to_string()).fmt(formatter),
+            LowerCamelCase => AsLowerCamelCase(self.value.to_string()).fmt(formatter),
+            UpperCamelCase => AsUpperCamelCase(self.value.to_string()).fmt(formatter),
+            LowerKebabCase => AsKebabCase(self.value.to_string()).fmt(formatter),
+            UpperKebabCase => AsShoutyKebabCase(self.value.to_string()).fmt(formatter),
+            TitleCase      => AsTitleCase(self.value.to_string()).fmt(formatter),
+            TrainCase      => AsTrainCase(self.value.to_string()).fmt(formatter),
+        }
     }
 }

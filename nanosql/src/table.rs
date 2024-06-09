@@ -785,21 +785,21 @@ impl<T: Table> Query for Insert<T> {
         let mut sep = "";
 
         for col in &desc.columns {
-            write!(sql, "{}\n    \"{}\"", sep, col.name)?;
+            write!(sql, "{sep}\n    \"{col}\"", col = col.name)?;
             sep = ", ";
         }
 
         sql.push_str("\n)\nVALUES(");
         sep = "";
 
-        for (idx, col) in (1..).zip(&desc.columns) {
+        for (idx, col) in (1_usize..).zip(&desc.columns) {
             // decide intelligently whether parameters should be named or numbered
             let param_name: &dyn Display = match Self::Input::PREFIX {
                 ParamPrefix::Question => &idx,
                 ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => &col.name
             };
 
-            write!(sql, "{}\n    {}{}", sep, Self::Input::PREFIX, param_name)?;
+            write!(sql, "{sep}\n    {pfx}{param_name}", pfx = Self::Input::PREFIX)?;
 
             sep = ", ";
         }

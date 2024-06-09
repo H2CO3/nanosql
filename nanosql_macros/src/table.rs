@@ -3,7 +3,7 @@ use syn::Error;
 use syn::{DeriveInput, Data, Fields, FieldsNamed};
 use syn::ext::IdentExt;
 use quote::quote;
-use crate::util::ContainerAttributes;
+use crate::util::{ContainerAttributes, FieldAttributes};
 
 
 /// TODO(H2CO3): handle generics?
@@ -46,15 +46,25 @@ fn expand_struct(
     fields: &FieldsNamed,
 ) -> Result<TokenStream, Error> {
     let ty_name = &input.ident;
-    let ty_name_str = ty_name.unraw().to_string();
+    let table_name = attrs.rename.unwrap_or_else(|| ty_name.unraw().to_string());
     let insert_input_ty = attrs.insert_input_ty;
     let insert_input_lt = attrs.insert_input_lt;
 
-    let col_name_str = fields.named.iter().map(|f| {
-        f.ident.as_ref().expect("named field is unnamed?").unraw().to_string()
-    });
-    let col_ty = fields.named.iter().map(|f| &f.ty);
+    let col_name_str: Vec<_> = fields.named
+        .iter()
+        .map(|f| {
+            let field_attrs: FieldAttributes = deluxe::parse_attributes(f)?;
+            let field_name = f.ident.as_ref().expect("named field is unnamed?");
 
+            let col_name = field_attrs.rename.unwrap_or_else(|| {
+                attrs.rename_all.display(field_name.unraw()).to_string()
+            });
+
+            Ok(col_name)
+        })
+        .collect::<Result<_, Error>>()?;
+
+    let col_ty = fields.named.iter().map(|f| &f.ty);
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
     Ok(quote!{
@@ -62,7 +72,7 @@ fn expand_struct(
             type InsertInput<#insert_input_lt> = #insert_input_ty;
 
             fn description() -> ::nanosql::TableDesc {
-                ::nanosql::TableDesc::new(#ty_name_str) #(
+                ::nanosql::TableDesc::new(#table_name) #(
                     .column(
                         ::nanosql::Column::new(#col_name_str)
                             .ty(<#col_ty as ::nanosql::AsSqlTy>::SQL_TY)

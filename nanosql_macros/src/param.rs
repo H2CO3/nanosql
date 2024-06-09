@@ -5,7 +5,7 @@ use syn::parse_quote;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
 use quote::quote;
-use crate::util::{add_bounds, ContainerAttributes, ParamPrefix};
+use crate::util::{add_bounds, ContainerAttributes, FieldAttributes, ParamPrefix};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
@@ -81,6 +81,7 @@ fn expand_named_fields(
     let body = fields.named
         .iter()
         .map(|field| {
+            let field_attrs: FieldAttributes = deluxe::parse_attributes(field)?;
             let field_name = field.ident.as_ref().ok_or_else(|| {
                 Error::new_spanned(field, "named field has no name")
             })?;
@@ -90,7 +91,12 @@ fn expand_named_fields(
             // However, still use the original field name in the field access
             // expression, otherwise raw identifiers would cause a syntax error.
             let literal_field_name = field_name.unraw();
-            let param_name = format!("{prefix}{literal_field_name}");
+            let literal_field_name = attrs.rename_all.display(&literal_field_name);
+            let param_name = if let Some(renamed) = field_attrs.rename.as_ref() {
+                format!("{prefix}{renamed}")
+            } else {
+                format!("{prefix}{literal_field_name}")
+            };
 
             Ok(quote!{
                 let index = statement.parameter_index(#param_name)?;

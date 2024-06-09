@@ -4,7 +4,7 @@ use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields, FieldsNamed, FieldsUn
 use syn::parse_quote;
 use syn::ext::IdentExt;
 use quote::quote;
-use crate::util::{add_bounds, ContainerAttributes};
+use crate::util::{add_bounds, ContainerAttributes, FieldAttributes};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
@@ -60,12 +60,13 @@ fn expand_struct(
 
 fn expand_named_fields(
     fields: &FieldsNamed,
-    _attrs: &ContainerAttributes,
+    attrs: &ContainerAttributes,
 ) -> Result<TokenStream, Error> {
     let mut field_names = Vec::with_capacity(fields.named.len());
     let mut column_names = Vec::with_capacity(fields.named.len());
 
     for field in &fields.named {
+        let field_attrs: FieldAttributes = deluxe::parse_attributes(field)?;
         let field_name = field.ident.as_ref().ok_or_else(|| {
             Error::new_spanned(field, "named field has no name")
         })?;
@@ -74,7 +75,9 @@ fn expand_named_fields(
         // part for naming the column, because that's what people expect.
         // However, still use the original field name in the field access
         // expression, otherwise raw identifiers would cause a syntax error.
-        let column_name = field_name.unraw().to_string();
+        let column_name = field_attrs.rename.unwrap_or_else(|| {
+            attrs.rename_all.display(field_name.unraw()).to_string()
+        });
 
         field_names.push(field_name);
         column_names.push(column_name);
