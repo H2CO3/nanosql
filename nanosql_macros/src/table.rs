@@ -3,7 +3,7 @@ use syn::Error;
 use syn::{DeriveInput, Data, Fields, FieldsNamed};
 use syn::ext::IdentExt;
 use quote::quote;
-use crate::util::{ContainerAttributes, FieldAttributes};
+use crate::util::{ContainerAttributes, FieldAttributes, IteratorExt};
 
 
 /// TODO(H2CO3): handle generics?
@@ -50,9 +50,9 @@ fn expand_struct(
     let insert_input_ty = attrs.insert_input_ty;
     let insert_input_lt = attrs.insert_input_lt;
 
-    let col_name_str: Vec<_> = fields.named
+    let (col_name_str, col_ty): (Vec<_>,  Vec<_>) = fields.named
         .iter()
-        .map(|f| {
+        .map(|f| -> Result<_, Error> {
             let field_attrs: FieldAttributes = deluxe::parse_attributes(f)?;
             let field_name = f.ident.as_ref().expect("named field is unnamed?");
 
@@ -60,11 +60,12 @@ fn expand_struct(
                 attrs.rename_all.display(field_name.unraw()).to_string()
             });
 
-            Ok(col_name)
-        })
-        .collect::<Result<_, Error>>()?;
+            let col_ty = field_attrs.sql_ty.unwrap_or(f.ty.clone());
 
-    let col_ty = fields.named.iter().map(|f| &f.ty);
+            Ok((col_name, col_ty))
+        })
+        .try_unzip()?;
+
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
     Ok(quote!{

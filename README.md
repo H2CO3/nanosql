@@ -47,16 +47,25 @@ use nanosql::{
 /// The parameter prefix is '$' by default (if not specified via the
 /// param_prefix attribute); it may also be one of ':', '@', or '?',
 /// the last one being allowed only for tuples and scalar parameters.
+///
+/// `#[nanosql(rename)]` on a struct renames the table itself, while
+/// `#[nanosql(rename_all)]` applies a casing convention to all columns.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Param, ResultRecord, Table)]
 #[nanosql(param_prefix = '$')] // optional
 #[nanosql(rename = "MyLittlePet", rename_all = "lowerCamelCase")]
 struct Pet {
+    /// If you don't like the default `AsSqlTy` impl for your column's
+    /// type, you can specify a different one. Here we add a non-zero
+    /// constraint, but the `id` remains a plain `i64` for convenience.
+    #[nanosql(sql_ty = core::num::NonZeroI64)]
     id: i64,
     nick_name: String,
+    /// You can also rename fields/columns one by one
     #[nanosql(rename = "type")]
     kind: PetKind,
 }
 
+/// Collective and field-level casing/renaming also works with `enum`s
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, ToSql, FromSql, AsSqlTy)]
 #[nanosql(rename_all = "UPPER_SNAKE_CASE")]
 enum PetKind {
@@ -114,6 +123,16 @@ fn main() -> Result<()> {
             kind: PetKind::Fish,
         },
     ])?;
+
+    // Inserting a pet with id = 0 should fail due to the `#[nanosql(sql_ty = ...)]` attribute.
+    let insert_id_0_result = conn.insert_batch([
+        Pet {
+            id: 0,
+            nick_name: "Error".into(),
+             kind: PetKind::Cat,
+        }
+    ]);
+    assert!(insert_id_0_result.is_err(), "id = 0 violates NonZeroI64's CHECK constraint");
 
     // We then compile the query into a prepared statement.
     let mut stmt = conn.compile(PetById)?;

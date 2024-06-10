@@ -71,7 +71,7 @@ fn expand_named_fields(
             Error::new_spanned(field, "named field has no name")
         })?;
 
-        // If the field name is a raw identifier, still use just the non-raw
+        // If the field name is a raw identifier, still only use the non-raw
         // part for naming the column, because that's what people expect.
         // However, still use the original field name in the field access
         // expression, otherwise raw identifiers would cause a syntax error.
