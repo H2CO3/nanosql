@@ -33,6 +33,30 @@ use ordered_float::NotNan;
 /// tuple. That functionality is provided by the `Param` and `ResultRecord` traits.
 ///
 /// This trait can be automatically derived on `struct`s with named fields.
+///
+/// Supported `struct`-level attributes are:
+///
+/// * `#[nanosql(rename = "TableName")]` changes the name of the table to the given
+///   string, instead of using the name of the `struct` itself.
+/// * `#[nanosql(rename_all = "casing")]` renames all fields based on the
+///   specified case-transforming convention. Valid casing conventions are:
+///
+///   * `lower_snake_case`
+///   * `UPPER_SNAKE_CASE`
+///   * `lowerCamelCase`
+///   * `UpperCamelCase` (Pascal case)
+///   * `lower-kebab-case` (Lisp case)
+///   * `UPPER-KEBAB-CASE`
+///   * `Title Case`
+///   * `Train-Case`
+///
+/// Supported field-level attributes are:
+///
+/// * `#[nanosql(rename = "column_name")]`: changes the name of the column
+///   to the specified string, instead of using the name of the field.
+/// * `#[nanosql(sql_ty = path::to::AsSqlTy)]`: forwards the `AsSqlTy` impl
+///   to the specified type, instead of using the field's own declared type.
+/// * `#[nanosql(unique)]`: imposes an SQL `UNIQUE` constraint on the field.
 pub trait Table {
     /// The parameter set bound to an `INSERT` statement inserting into this table.
     /// In simple cases, it can be `Self`. For a more efficient implementation (no
@@ -504,6 +528,10 @@ impl Display for TableConstraint {
 ///
 /// This trait can be automatically derived on `enum`s with only unit
 /// variants, and on newtype structs, along with `ToSql` and `FromSql`.
+///
+/// When derived on an `enum`, the `rename_all` type-level attribute
+/// and the `rename` variant-level attribute work in the same way as
+/// the equivalent attributes on [`Table`] (see its documentation).
 pub trait AsSqlTy {
     /// The SQL type corresponding to this type.
     const SQL_TY: SqlTy;

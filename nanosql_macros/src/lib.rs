@@ -26,6 +26,10 @@ pub fn derive_table(ts: TokenStream) -> TokenStream {
 
 /// The purpose of this derive macro is to implement the `rusqlite::ToSql`
 /// trait for `enum`s (with unit variants only) and newtype wrapper `struct`s.
+///
+/// When derived on an `enum`, the `rename_all` (type-level) and `rename`
+/// (variant-level) attributes work in the same manner as those of `Table`.
+/// See the documentation of `Table` for details.
 #[proc_macro_derive(ToSql, attributes(nanosql))]
 pub fn derive_to_sql(ts: TokenStream) -> TokenStream {
     util::expand(ts, to_sql::expand)
@@ -33,6 +37,10 @@ pub fn derive_to_sql(ts: TokenStream) -> TokenStream {
 
 /// The purpose of this derive macro is to implement the `rusqlite::FromSql`
 /// trait for `enum`s (with unit variants only) and newtype wrapper `struct`s.
+///
+/// When derived on an `enum`, the `rename_all` (type-level) and `rename`
+/// (variant-level) attributes work in the same manner as those of `Table`.
+/// See the documentation of `Table` for details.
 #[proc_macro_derive(FromSql, attributes(nanosql))]
 pub fn derive_from_sql(ts: TokenStream) -> TokenStream {
     util::expand(ts, from_sql::expand)
