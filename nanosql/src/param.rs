@@ -111,8 +111,8 @@ impl FromStr for ParamPrefix {
 /// * Singleton/forwarding wrappers of any of the above, e.g. `&T` and `Box`
 ///
 /// When derived on a `struct`, the `rename_all` (type-level) and `rename`
-/// (field-level) attributes work identically to those of `Table`; see its
-/// documentation for more details.
+/// (field-level) attributes work identically to those of [`Table`](crate::table::Table);
+/// see its documentation for more details.
 pub trait Param {
     /// The leading symbol in parameter names. (Must be consistent across parameters.)
     const PREFIX: ParamPrefix;
