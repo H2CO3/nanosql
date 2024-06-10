@@ -95,6 +95,9 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: applies additional CHECK constraints.
     #[deluxe(append)]
     pub check: Vec<String>,
+    /// For `#[derive(Table)]`: provides a default value when column
+    /// value is omitted during insertion.
+    pub default: Option<String>,
 }
 
 /// Represents the allowed (and compulsory) first character of a parameter

@@ -59,6 +59,9 @@ use ordered_float::NotNan;
 /// * `#[nanosql(unique)]`: imposes an SQL `UNIQUE` constraint on the field.
 /// * `#[nanosql(check = "expression1", check = "expression2", ...)]`:
 ///    imposes additional `CHECK` constraints.
+/// * `#[nanosql(default = "expression")]`: apply a default value (literal
+///   or full-blown SQL expression) upon an `INSERT` statements, when the
+///   value for the column is omitted.
 pub trait Table {
     /// The parameter set bound to an `INSERT` statement inserting into this table.
     /// In simple cases, it can be `Self`. For a more efficient implementation (no

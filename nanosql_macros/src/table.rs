@@ -78,6 +78,7 @@ fn expand_struct(
         .map(|field_attrs| {
             field_attrs.unique.then_some(quote!(.unique()))
         });
+
     let check_constraint = attrs_for_each_field
         .iter()
         .map(|field_attrs| {
@@ -86,6 +87,14 @@ fn expand_struct(
             quote!{
                 #(.check(#constraints))*
             }
+        });
+
+    let default_value = attrs_for_each_field
+        .iter()
+        .map(|field_attrs| {
+            field_attrs.default.as_ref().map(|expr| {
+                quote!{.default_value(#expr)}
+            })
         });
 
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
@@ -108,6 +117,7 @@ fn expand_struct(
                             )
                             #uniq_constraint
                             #check_constraint
+                            #default_value
                     )
                 )*
             }
