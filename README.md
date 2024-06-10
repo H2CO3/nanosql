@@ -59,6 +59,7 @@ struct Pet {
     /// constraint, but the `id` remains a plain `i64` for convenience.
     #[nanosql(sql_ty = core::num::NonZeroI64)]
     id: i64,
+    #[nanosql(unique)]
     nick_name: String,
     /// You can also rename fields/columns one by one
     #[nanosql(rename = "type")]
@@ -124,16 +125,6 @@ fn main() -> Result<()> {
         },
     ])?;
 
-    // Inserting a pet with id = 0 should fail due to the `#[nanosql(sql_ty = ...)]` attribute.
-    let insert_id_0_result = conn.insert_batch([
-        Pet {
-            id: 0,
-            nick_name: "Error".into(),
-             kind: PetKind::Cat,
-        }
-    ]);
-    assert!(insert_id_0_result.is_err(), "id = 0 violates NonZeroI64's CHECK constraint");
-
     // We then compile the query into a prepared statement.
     let mut stmt = conn.compile(PetById)?;
 
@@ -148,6 +139,28 @@ fn main() -> Result<()> {
     // We can re-use the statement and execute it multiple times
     let result = stmt.invoke(99)?;
     assert_eq!(result, None);
+
+    drop(stmt);
+
+    // Inserting a pet with id = 0 should fail due to the `#[nanosql(sql_ty = ...)]` attribute.
+    let insert_id_0_result = conn.insert_batch([
+        Pet {
+            id: 0,
+            nick_name: "Error".into(),
+            kind: PetKind::Cat,
+        }
+    ]);
+    assert!(insert_id_0_result.is_err(), "id = 0 violates NonZeroI64's CHECK constraint");
+
+    // Inserting a pet with a duplicate name is not allowed due to `#[nanosql(unique)]`.
+    let insert_dup_name_result = conn.insert_batch([
+        Pet {
+            id: 137731,
+            nick_name: "Hello Kitty".into(),
+            kind: PetKind::Dog,
+        }
+    ]);
+    assert!(insert_dup_name_result.is_err(), "duplicate name violates uniqueness constraint");
 
     Ok(())
 }

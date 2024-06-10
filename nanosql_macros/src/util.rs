@@ -89,6 +89,9 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: specifies an alternate SQL type source
     /// (`AsSqlTy`) for the column, instead of using the field's type.
     pub sql_ty: Option<Type>,
+    /// For `#[derive(Table)]`: declares that the field must be unique.
+    #[deluxe(default = false)]
+    pub unique: bool,
 }
 
 /// Represents the allowed (and compulsory) first character of a parameter
@@ -271,25 +274,3 @@ impl<T: Display> Display for CaseConversionDisplay<T> {
         }
     }
 }
-
-pub trait IteratorExt: Iterator {
-    fn try_unzip<CL, CR, TL, TR, E>(self) -> Result<(CL, CR), E>
-    where
-        Self: Sized + Iterator<Item = Result<(TL, TR), E>>,
-        CL: Default + Extend<TL>,
-        CR: Default + Extend<TR>,
-    {
-        let mut coll_left  = CL::default();
-        let mut coll_right = CR::default();
-
-        for result in self {
-            let (item_left, item_right) = result?;
-            coll_left.extend(Some(item_left));
-            coll_right.extend(Some(item_right));
-        }
-
-        Ok((coll_left, coll_right))
-    }
-}
-
-impl<T: Iterator> IteratorExt for T {}
