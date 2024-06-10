@@ -57,7 +57,9 @@ struct Pet {
     /// If you don't like the default `AsSqlTy` impl for your column's
     /// type, you can specify a different one. Here we add a non-zero
     /// constraint, but the `id` remains a plain `i64` for convenience.
-    #[nanosql(sql_ty = core::num::NonZeroI64)]
+    ///
+    /// You can also add additional `CHECK` constraints, if necessary.
+    #[nanosql(sql_ty = core::num::NonZeroI64, check = "id <= 999999")]
     id: i64,
     #[nanosql(unique)]
     nick_name: String,
@@ -151,6 +153,16 @@ fn main() -> Result<()> {
         }
     ]);
     assert!(insert_id_0_result.is_err(), "id = 0 violates NonZeroI64's CHECK constraint");
+
+    // Inserting a pet with a high ID is expected to fail due to the CHECK constraint.
+    let insert_id_high_result = conn.insert_batch([
+        Pet {
+            id: 1000000,
+            nick_name: "this is unique".into(),
+            kind: PetKind::Dog,
+        }
+    ]);
+    assert!(insert_id_high_result.is_err(), "id = 1000000 violates extra CHECK constraint");
 
     // Inserting a pet with a duplicate name is not allowed due to `#[nanosql(unique)]`.
     let insert_dup_name_result = conn.insert_batch([

@@ -78,6 +78,15 @@ fn expand_struct(
         .map(|field_attrs| {
             field_attrs.unique.then_some(quote!(.unique()))
         });
+    let check_constraint = attrs_for_each_field
+        .iter()
+        .map(|field_attrs| {
+            let constraints = field_attrs.check.as_slice();
+
+            quote!{
+                #(.check(#constraints))*
+            }
+        });
 
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
@@ -98,6 +107,7 @@ fn expand_struct(
                                 )
                             )
                             #uniq_constraint
+                            #check_constraint
                     )
                 )*
             }

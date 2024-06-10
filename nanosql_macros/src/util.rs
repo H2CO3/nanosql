@@ -92,6 +92,9 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: declares that the field must be unique.
     #[deluxe(default = false)]
     pub unique: bool,
+    /// For `#[derive(Table)]`: applies additional CHECK constraints.
+    #[deluxe(append)]
+    pub check: Vec<String>,
 }
 
 /// Represents the allowed (and compulsory) first character of a parameter

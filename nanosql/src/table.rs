@@ -57,6 +57,8 @@ use ordered_float::NotNan;
 /// * `#[nanosql(sql_ty = path::to::AsSqlTy)]`: forwards the `AsSqlTy` impl
 ///   to the specified type, instead of using the field's own declared type.
 /// * `#[nanosql(unique)]`: imposes an SQL `UNIQUE` constraint on the field.
+/// * `#[nanosql(check = "expression1", check = "expression2", ...)]`:
+///    imposes additional `CHECK` constraints.
 pub trait Table {
     /// The parameter set bound to an `INSERT` statement inserting into this table.
     /// In simple cases, it can be `Self`. For a more efficient implementation (no
