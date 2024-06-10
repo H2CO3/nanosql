@@ -73,6 +73,22 @@ pub trait Table {
     fn description() -> TableDesc;
 }
 
+/// A blanket impl for the happy place of "everything is covariant".
+///
+/// Might be useful for someone.
+impl<'p, T: Table> Table for &'p T
+where
+    T: Table<InsertInput<'p> = T>,
+    T::InsertInput<'p>: 'p,
+    T::InsertInput<'p>: InsertInput<'p, Table = Self>,
+{
+    type InsertInput<'q> = &'p T::InsertInput<'p>;
+
+    fn description() -> TableDesc {
+        <T as Table>::description()
+    }
+}
+
 /// A trait for denoting types used as parameters for `INSERT`ing
 /// into a given table. This is only a type-level marker, of which
 /// the sole purpose is to link the table being inserted into via
