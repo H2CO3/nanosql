@@ -3,7 +3,7 @@ use syn::Error;
 use syn::{DeriveInput, Data, Fields, FieldsNamed};
 use syn::ext::IdentExt;
 use quote::quote;
-use crate::util::{ContainerAttributes, FieldAttributes};
+use crate::util::{ContainerAttributes, FieldAttributes, GeneratedColumnMode};
 
 
 /// TODO(H2CO3): handle generics?
@@ -97,10 +97,27 @@ fn expand_struct(
             })
         });
 
+    let generated = attrs_for_each_field
+        .iter()
+        .map(|field_attrs| {
+            field_attrs.generated.as_ref().map(|spec| {
+                let expr = &spec.expr;
+
+                match spec.mode {
+                    GeneratedColumnMode::Virtual => quote!{
+                        .generate_virtual(#expr)
+                    },
+                    GeneratedColumnMode::Stored => quote!{
+                        .generate_stored(#expr)
+                    },
+                }
+            })
+        });
+
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
     Ok(quote!{
-        impl<#impl_gen> ::nanosql::Table<#ty_gen> for #ty_name #where_clause {
+        impl #impl_gen ::nanosql::Table for #ty_name #ty_gen #where_clause {
             type InsertInput<#insert_input_lt> = #insert_input_ty;
 
             fn description() -> ::nanosql::TableDesc {
@@ -118,6 +135,7 @@ fn expand_struct(
                             #uniq_constraint
                             #check_constraint
                             #default_value
+                            #generated
                     )
                 )*
             }

@@ -3,6 +3,7 @@ use proc_macro::TokenStream;
 mod param;
 mod result_record;
 mod table;
+mod insert_input;
 mod to_sql;
 mod from_sql;
 mod as_sql_ty;
@@ -22,6 +23,11 @@ pub fn derive_result_record(ts: TokenStream) -> TokenStream {
 #[proc_macro_derive(Table, attributes(nanosql))]
 pub fn derive_table(ts: TokenStream) -> TokenStream {
     util::expand(ts, table::expand)
+}
+
+#[proc_macro_derive(InsertInput, attributes(nanosql))]
+pub fn derive_insert_input(ts: TokenStream) -> TokenStream {
+    util::expand(ts, insert_input::expand)
 }
 
 /// The purpose of this derive macro is to implement the `rusqlite::ToSql`

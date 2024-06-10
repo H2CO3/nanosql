@@ -4,7 +4,7 @@ use core::borrow::Borrow;
 use rusqlite::{Connection, TransactionBehavior};
 use crate::{
     query::Query,
-    table::{Table, Create, Insert},
+    table::{Table, InsertInput, Create, Insert},
     stmt::CompiledStatement,
     error::{Error, Result},
     util::Sealed,
@@ -46,9 +46,10 @@ pub trait ConnectionExt: Sealed {
     fn insert_batch_no_txn<'p, I>(&self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: Table<InsertInput<'p> = I::Item>,
+        I::Item: InsertInput<'p>,
     {
-        let mut stmt = self.compile(Insert::<I::Item>::default())?;
+        let insert = Insert::<<I::Item as InsertInput<'p>>::Table>::default();
+        let mut stmt = self.compile(insert)?;
 
         entities
             .into_iter()
@@ -61,7 +62,7 @@ pub trait ConnectionExt: Sealed {
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: Table<InsertInput<'p> = I::Item>;
+        I::Item: InsertInput<'p>;
 }
 
 impl ConnectionExt for Connection {
@@ -75,7 +76,7 @@ impl ConnectionExt for Connection {
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
-        I::Item: Table<InsertInput<'p> = I::Item>,
+        I::Item: InsertInput<'p>,
     {
         let txn = self.transaction_with_behavior(TransactionBehavior::Immediate)?;
         txn.insert_batch_no_txn(entities)?;

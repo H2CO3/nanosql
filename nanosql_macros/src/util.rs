@@ -2,12 +2,13 @@ use core::fmt::{self, Display, Formatter, Write};
 use std::collections::HashSet;
 use proc_macro::TokenStream as TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
-use syn::{Error, Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit, Type, Lifetime};
+use syn::{Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit, LitStr, Type, Lifetime};
 use syn::parse_quote;
-use syn::parse::{Parse, ParseStream};
+use syn::parse::{Parse, ParseStream, Error};
 use syn::punctuated::Punctuated;
+use syn::ext::IdentExt;
 use quote::ToTokens;
-use deluxe::{ParseAttributes, ParseMetaItem};
+use deluxe::{ParseAttributes, ParseMetaItem, ParseMode};
 
 
 pub fn expand<F>(ts: TokenStream, f: F) -> TokenStream
@@ -72,6 +73,8 @@ pub struct ContainerAttributes {
     pub insert_input_lt: Lifetime,
     /// For `#[derive(Table)]`: the name of the table itself.
     pub rename: Option<String>,
+    /// For `#[derive(InsertInput)]`: the `Table` associated type of the insert input.
+    pub table: Option<Type>,
     /// For various macros: rename all fields or variants,
     /// according to the specified case conversion.
     #[deluxe(default)]
@@ -98,6 +101,44 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: provides a default value when column
     /// value is omitted during insertion.
     pub default: Option<String>,
+    /// For `#[derive(Table)]`: specifies that the column should be
+    /// generated based on some expression involving other columns.
+    pub generated: Option<GeneratedColumnSpec>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GeneratedColumnSpec {
+    pub mode: GeneratedColumnMode,
+    pub expr: String,
+}
+
+impl ParseMetaItem for GeneratedColumnSpec {
+    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+        let mode: GeneratedColumnMode = input.parse()?;
+        let _eq: Token![=] = input.parse()?;
+        let lit: LitStr = input.parse()?;
+        let expr = lit.value();
+
+        Ok(GeneratedColumnSpec { mode, expr })
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum GeneratedColumnMode {
+    Virtual,
+    Stored,
+}
+
+impl Parse for GeneratedColumnMode {
+    fn parse(input: ParseStream) -> Result<Self, Error> {
+        let ident = Ident::parse_any(input)?;
+
+        match ident.unraw().to_string().as_str() {
+            "virtual" => Ok(GeneratedColumnMode::Virtual),
+            "stored" => Ok(GeneratedColumnMode::Stored),
+            _ => Err(Error::new_spanned(ident, "generated column must be `virtual` or `stored`")),
+        }
+    }
 }
 
 /// Represents the allowed (and compulsory) first character of a parameter
@@ -225,12 +266,13 @@ pub enum CaseConversion {
 impl Parse for CaseConversion {
     fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
         let lookahead = stream.lookahead1();
-        if lookahead.peek(syn::LitStr) {
-            stream.parse::<syn::LitStr>()?.parse()
-        } else if lookahead.peek(syn::Ident) {
-            let s = <syn::Ident as syn::ext::IdentExt>::parse_any(stream)?.to_string();
 
-            Ok(match s.as_ref() {
+        if lookahead.peek(LitStr) {
+            stream.parse::<LitStr>()?.parse()
+        } else if lookahead.peek(Ident::peek_any) {
+            let s = Ident::parse_any(stream)?;
+
+            Ok(match s.to_string().as_str() {
                 "identity" => CaseConversion::Identity,
                 "lower_snake_case" => CaseConversion::LowerSnakeCase,
                 "UPPER_SNAKE_CASE" => CaseConversion::UpperSnakeCase,
@@ -240,7 +282,7 @@ impl Parse for CaseConversion {
                 "UPPER-KEBAB-CASE" => CaseConversion::UpperKebabCase,
                 "Title Case" => CaseConversion::TitleCase,
                 "Train-Case" => CaseConversion::TrainCase,
-                _ => return Err(stream.error("invalid case conversion method")),
+                _ => return Err(Error::new_spanned(s, "invalid case conversion method")),
             })
         } else {
             Err(lookahead.error())

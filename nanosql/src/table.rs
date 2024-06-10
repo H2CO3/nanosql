@@ -63,46 +63,49 @@ use ordered_float::NotNan;
 ///   or full-blown SQL expression) upon an `INSERT` statements, when the
 ///   value for the column is omitted.
 pub trait Table {
-    /// The parameter set bound to an `INSERT` statement inserting into this table.
-    /// In simple cases, it can be `Self`. For a more efficient implementation (no
-    /// allocation) or to support default fields, specify a different input type.
-    type InsertInput<'p>: Param;
+    /// The parameter set used for performing `INSERT` queries.
+    /// This is often just `Self`, but it may be a differen type,
+    /// e.g. when the table contains optional columns (of a nullable
+    /// type or with a `DEFAULT` value), and/or generated columns.
+    type InsertInput<'p>: InsertInput<'p, Table = Self>;
 
     /// The value-level description of the table.
     fn description() -> TableDesc;
 }
 
-impl<T> Table for &T
-where
-    T: ?Sized + Table
-{
-    type InsertInput<'p> = T::InsertInput<'p>;
-
-    fn description() -> TableDesc {
-        T::description()
-    }
+/// A trait for denoting types used as parameters for `INSERT`ing
+/// into a given table. This is only a type-level marker, of which
+/// the sole purpose is to link the table being inserted into via
+/// the `Table` associated type. This is purely for convenience:
+/// it allows us to avoid type annotations on the insertion methods
+/// of [`ConnectionExt`](crate::conn::ConnectionExt), namely:
+/// [`insert_batch`](crate::conn::ConnectionExt::insert_batch) and
+/// [`insert_batch_no_txn`](crate::conn::ConnectionExt::insert_batch_no_txn).
+///
+/// A convenience blanket impl is provided for types that implement both
+/// `Table` and `Param`, so that no additional `#[derive(InsertInput)]` is
+/// needed in the simple case when the table is its own primary insert input.
+///
+/// When automatically derived, the following container-level attributes apply:
+///
+/// * `#[nanosql(table = type)]`: allows specifying the `Table` associated type.
+///   This attribute is **obligatory.** (It _could_ technically default to `Self`
+///   for types that also implement `Table`, but that would be useless, due to
+///   the blanket impl preventing another, conflicting impl on the same type.)
+/// * `#[nanosql(insert_input_lt = 'p)]`: allows specifying the type parameter
+///   of the trait in the impl. It defaults to `'p` (for parameters). This is
+///   **not** added to the list of generic arguments, so it should be an already
+///   existing generic lifetime parameter of the input type itself.
+pub trait InsertInput<'p>: Param {
+    /// The table that uses this parameter set as its primary insertion input.
+    type Table: Table<InsertInput<'p> = Self>;
 }
 
-impl<T> Table for &mut T
+impl<'p, T> InsertInput<'p> for T
 where
-    T: ?Sized + Table
+    T: Param + Table<InsertInput<'p> = Self>
 {
-    type InsertInput<'p> = T::InsertInput<'p>;
-
-    fn description() -> TableDesc {
-        T::description()
-    }
-}
-
-impl<T> Table for Box<T>
-where
-    T: ?Sized + Table
-{
-    type InsertInput<'p> = T::InsertInput<'p>;
-
-    fn description() -> TableDesc {
-        T::description()
-    }
+    type Table = Self;
 }
 
 /// Describes the structure of an SQL table.
@@ -124,6 +127,12 @@ impl TableDesc {
             columns: Vec::new(),
             constraints: BTreeSet::new(),
         }
+    }
+
+    /// Returns columns necessary for inserting into this table.
+    /// For example, this skips `GENERATED` columns.
+    fn columns_for_insert(&self) -> impl Iterator<Item = &Column> {
+        self.columns.iter().filter(|column| !column.is_generated())
     }
 
     /// Adds a column to the table description.
@@ -273,6 +282,13 @@ impl Column {
         } else {
             self.constrain(ColumnConstraint::Check { condition })
         }
+    }
+
+    /// Returns `true` if and only if this column is generated.
+    pub fn is_generated(&self) -> bool {
+        self.constraints.iter().any(|constraint| {
+            matches!(constraint, ColumnConstraint::Generated { .. })
+        })
     }
 }
 
@@ -817,7 +833,7 @@ impl<T: Table> Query for Insert<T> {
         let mut sql = format!(r#"INSERT INTO "{}"("#, desc.name);
         let mut sep = "";
 
-        for col in &desc.columns {
+        for col in desc.columns_for_insert() {
             write!(sql, "{sep}\n    \"{col}\"", col = col.name)?;
             sep = ", ";
         }
@@ -825,7 +841,7 @@ impl<T: Table> Query for Insert<T> {
         sql.push_str("\n)\nVALUES(");
         sep = "";
 
-        for (idx, col) in (1_usize..).zip(&desc.columns) {
+        for (idx, col) in (1_usize..).zip(desc.columns_for_insert()) {
             // decide intelligently whether parameters should be named or numbered
             let param_name: &dyn Display = match Self::Input::PREFIX {
                 ParamPrefix::Question => &idx,

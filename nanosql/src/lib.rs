@@ -19,7 +19,7 @@ pub use rusqlite::{
     types::{self, ToSql, FromSql, Value, ValueRef, ToSqlOutput, FromSqlResult},
 };
 pub use query::Query;
-pub use table::{Table, TableDesc, Column, SqlTy, TyPrim, AsSqlTy, Create, Insert};
+pub use table::{Table, InsertInput, TableDesc, Column, SqlTy, TyPrim, AsSqlTy, Create, Insert};
 pub use stmt::CompiledStatement;
 pub use conn::ConnectionExt;
 pub use param::{Param, ParamPrefix};
@@ -30,4 +30,4 @@ pub use error::{Error, Result};
 pub use ordered_float::NotNan;
 
 #[cfg(feature = "derive")]
-pub use nanosql_macros::{ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table};
+pub use nanosql_macros::{ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table, InsertInput};
