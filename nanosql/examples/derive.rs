@@ -128,6 +128,7 @@ fn do_it() -> Result<()> {
     ]);
     assert!(dup_id_result.is_err(), "duplicate Primary Key must not be allowed");
 
+    conn.create_table::<Hierarchy>()?;
     conn.insert_batch([
         Hierarchy {
             section: "Section One".into(),
