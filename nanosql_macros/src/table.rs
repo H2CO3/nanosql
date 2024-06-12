@@ -3,12 +3,10 @@ use syn::Error;
 use syn::{DeriveInput, Data, Fields, FieldsNamed};
 use syn::ext::IdentExt;
 use quote::quote;
+use deluxe::SpannedValue;
 use crate::util::{ContainerAttributes, FieldAttributes, GeneratedColumnMode};
 
 
-/// TODO(H2CO3): handle generics?
-/// TODO(H2CO3): handle various field-level and table-level attributes such as:
-/// rename(_all), skip, PK, FK, unique, check, default, generated, etc.
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
     let attrs: ContainerAttributes = deluxe::parse_attributes(&input)?;
@@ -55,7 +53,7 @@ fn expand_struct(
         .map(deluxe::parse_attributes)
         .collect::<Result<_, _>>()?;
 
-    let col_name_str = fields.named
+    let col_name_str: Vec<_> = fields.named
         .iter()
         .zip(&attrs_for_each_field)
         .map(|(f, field_attrs)| {
@@ -64,13 +62,22 @@ fn expand_struct(
             field_attrs.rename.clone().unwrap_or_else(|| {
                 attrs.rename_all.display(field_name.unraw()).to_string()
             })
-        });
+        })
+        .collect();
+
+    validate_primary_key(&attrs.primary_key, &attrs_for_each_field, &col_name_str)?;
 
     let col_ty = fields.named
         .iter()
         .zip(&attrs_for_each_field)
         .map(|(f, field_attrs)| {
             field_attrs.sql_ty.clone().unwrap_or_else(|| f.ty.clone())
+        });
+
+    let primary_key = attrs_for_each_field
+        .iter()
+        .map(|field_attrs| {
+            field_attrs.primary_key.then_some(quote!(.pk()))
         });
 
     let uniq_constraint = attrs_for_each_field
@@ -114,6 +121,20 @@ fn expand_struct(
             })
         });
 
+    let table_primary_key = if attrs.primary_key.is_empty() {
+        None
+    } else {
+        // must extract the strings manually, since `impl ToTokens for SpannedValue` is bogus.
+        // see:
+        // - https://github.com/jf2048/deluxe/issues/21
+        // - https://github.com/jf2048/deluxe/pull/22
+        let columns = attrs.primary_key.iter().map(|item| item.as_str());
+
+        Some(quote!{
+            .pk([#(#columns,)*])
+        })
+    };
+
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
     Ok(quote!{
@@ -132,13 +153,53 @@ fn expand_struct(
                                     )
                                 )
                             )
+                            #primary_key
                             #uniq_constraint
                             #check_constraint
                             #default_value
                             #generated
                     )
                 )*
+                #table_primary_key
             }
         }
     })
+}
+
+fn validate_primary_key(
+    table_pk_cols: &SpannedValue<Vec<SpannedValue<String>>>,
+    field_attrs: &[FieldAttributes],
+    all_cols: &[String],
+) -> Result<(), Error> {
+    assert_eq!(field_attrs.len(), all_cols.len());
+
+    // ensure that columns referenced in the table-level PK do in fact exist
+    if let Some(err_col) = table_pk_cols.iter().find(|col| !all_cols.contains(col)) {
+        return Err(Error::new_spanned(
+            err_col,
+            format_args!("unknown column `{err_col}` in primary key")
+        ));
+    }
+
+    let mut column_pk_iter = field_attrs.iter().filter(|a| *a.primary_key);
+
+    if let Some(column_pk) = column_pk_iter.next() {
+        // ensure that a column-level PK does not conflict with the table-level PK
+        if !table_pk_cols.is_empty() {
+            return Err(Error::new_spanned(
+                column_pk.primary_key,
+                "primary key declared at both the table and the column level"
+            ));
+        }
+
+        // ensure that at most one column is marked as the PK
+        if let Some(dup_pk) = column_pk_iter.next() {
+            return Err(Error::new_spanned(
+                dup_pk.primary_key,
+                "more than one primary key column; use the table-level attribute instead"
+            ));
+        }
+    }
+
+    Ok(())
 }

@@ -310,7 +310,7 @@ impl Column {
 
 impl Display for Column {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(formatter, "\"{}\"", self.name)?;
+        write!(formatter, r#""{}""#, self.name)?;
 
         if let Some(ty) = self.ty {
             write!(formatter, " {ty}")?;
@@ -798,7 +798,7 @@ impl<T: Table> Query for Create<T> {
 
     fn sql(&self) -> Result<impl AsRef<str> + '_> {
         let desc = T::description();
-        let mut sql = format!("CREATE TABLE IF NOT EXISTS \"{}\"(", desc.name);
+        let mut sql = format!(r#"CREATE TABLE IF NOT EXISTS "{}"("#, desc.name);
         let mut sep = "";
 
         for column in &desc.columns {

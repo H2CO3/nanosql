@@ -34,6 +34,25 @@ struct MusicalInstrumentInsertParams<'make_lt> {
     kind: MusicalInstrumentKind,
 }
 
+#[derive(Clone, Debug, Table, Param, ResultRecord)]
+struct Orchestra {
+    #[nanosql(pk)]
+    id: i16,
+    name: String,
+    #[nanosql(check = "1000 <= founded", check = "founded <= 9999")]
+    founded: u16,
+}
+
+#[derive(Clone, Debug, Table, Param, ResultRecord)]
+#[nanosql(pk = ["section", "other_name"])]
+struct Hierarchy {
+    section: Box<str>,
+    /// the `primary_key` directive must respect the `rename` attribute
+    #[nanosql(rename = "other_name")]
+    subsection: u64,
+    value: f32,
+}
+
 nanosql::define_query! {
     InsertUnknownInstrument<'p>: (u32, MusicalInstrumentKind) => () {
         "INSERT INTO musical_instrument(id, kind) VALUES (?, ?)"
@@ -87,6 +106,43 @@ fn do_it() -> Result<()> {
         description: "Unknown Instrument (tuba)".into(),
     }));
     println!("instrument ID = #137: {result:#?}");
+
+    drop(find_by_id);
+    drop(insert_unknown);
+
+    conn.create_table::<Orchestra>()?;
+    conn.insert_batch([
+        Orchestra {
+            id: 7,
+            name: "Seven Eleven".into(),
+            founded: 1977,
+        },
+    ])?;
+
+    let dup_id_result = conn.insert_batch([
+        Orchestra {
+            id: 7,
+            name: "Some Other Name".into(),
+            founded: 1985,
+        },
+    ]);
+    assert!(dup_id_result.is_err(), "duplicate Primary Key must not be allowed");
+
+    conn.insert_batch([
+        Hierarchy {
+            section: "Section One".into(),
+            subsection: 42137,
+            value: 9.87654321,
+        },
+    ])?;
+    let dup_multi_col_pk_result = conn.insert_batch([
+        Hierarchy {
+            section: "Section One".into(),
+            subsection: 42137,
+            value: 1.23456789,
+        },
+    ]);
+    assert!(dup_multi_col_pk_result.is_err(), "duplicate multi-column PK must not be allowed");
 
     Ok(())
 }

@@ -1,7 +1,7 @@
 //! Working with top-level SQLite connections.
 
 use core::borrow::Borrow;
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 use crate::{
     query::Query,
     table::{Table, InsertInput, Create, Insert},
@@ -56,9 +56,13 @@ pub trait ConnectionExt: Sealed {
             .try_for_each(|item| stmt.invoke(item))
     }
 
-    /// This is a faster and safer variant of [`ConnectionExt::insert_batch_no_txn()`].
-    /// It opens a single transaction for all of the insert statements, which prevents
-    /// other queries from observing the data in a partially-inserted state.
+    /// Convenience method for inserting many rows into a table in one go.
+    ///
+    /// It opens a single transaction for all of the insert statements, which
+    /// prevents others from observing the data in a partially-inserted state.
+    ///
+    /// It prepares an `INSERT` statement and calls it in a loop, so it's more
+    /// efficient than re-preparing and executing the same statement in a loop.
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
@@ -79,9 +83,44 @@ impl ConnectionExt for Connection {
         I::Item: InsertInput<'p>,
     {
         let txn = self.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        txn.insert_batch_no_txn(entities)?;
+        txn.insert_batch(entities)?;
         txn.commit().map_err(Error::from)
     }
 }
 
+/// This extension trait defines convenience methods on [`Transaction`].
+#[allow(private_bounds)]
+pub trait TransactionExt: Sealed {
+    /// Convenience method for inserting many rows into a table in one go.
+    ///
+    /// This is an escape hatch for when you can't borrow the [`Connection`]
+    /// mutably. It is recommended to use [`ConnectionExt::insert_batch()`] by
+    /// default, unless you can't provide unique access to the [`Connection`].
+    fn insert_batch<'p, I>(&self, entities: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>;
+}
+
+impl TransactionExt for Transaction<'_> {
+    /// Convenience method for inserting many rows into a table in one go.
+    ///
+    /// This is an escape hatch for when you can't borrow the [`Connection`]
+    /// mutably. It is recommended to use [`ConnectionExt::insert_batch()`] by
+    /// default, unless you can't provide unique access to the [`Connection`].
+    fn insert_batch<'p, I>(&self, entities: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>,
+    {
+        let insert = Insert::<<I::Item as InsertInput<'p>>::Table>::default();
+        let mut stmt = self.compile(insert)?;
+
+        entities
+            .into_iter()
+            .try_for_each(|item| stmt.invoke(item))
+    }
+}
+
 impl Sealed for Connection {}
+impl Sealed for Transaction<'_> {}

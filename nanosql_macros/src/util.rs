@@ -8,7 +8,7 @@ use syn::parse::{Parse, ParseStream, Error};
 use syn::punctuated::Punctuated;
 use syn::ext::IdentExt;
 use quote::ToTokens;
-use deluxe::{ParseAttributes, ParseMetaItem, ParseMode};
+use deluxe::{ParseAttributes, ParseMetaItem, ParseMode, SpannedValue};
 
 
 pub fn expand<F>(ts: TokenStream, f: F) -> TokenStream
@@ -80,6 +80,9 @@ pub struct ContainerAttributes {
     #[deluxe(default)]
     #[deluxe(with = deluxe::with::syn)]
     pub rename_all: CaseConversion,
+    /// For `#[derive(Table)]`: the Primary Key columns.
+    #[deluxe(default, alias = pk)]
+    pub primary_key: SpannedValue<Vec<SpannedValue<String>>>,
 }
 
 /// Attributes on a struct field or an enum variant.
@@ -92,6 +95,9 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: specifies an alternate SQL type source
     /// (`AsSqlTy`) for the column, instead of using the field's type.
     pub sql_ty: Option<Type>,
+    /// For `#[derive(Table)]`: marks the field as the PRIMARY KEY.
+    #[deluxe(alias = pk, default = SpannedValue::new(false))]
+    pub primary_key: SpannedValue<bool>,
     /// For `#[derive(Table)]`: declares that the field must be unique.
     #[deluxe(default = false)]
     pub unique: bool,

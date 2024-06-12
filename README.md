@@ -61,6 +61,7 @@ struct Pet {
     /// You can also add additional `CHECK` constraints, if necessary.
     #[nanosql(sql_ty = core::num::NonZeroI64, check = "id <= 999999")]
     id: i64,
+    /// You can apply a `UNIQUE` constraint to any field.
     #[nanosql(unique)]
     nick_name: String,
     /// You can also rename fields/columns one by one
@@ -176,4 +177,40 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+```
+
+### A note about batch insertion and transactions
+
+The `ConnectionExt::insert_batch()` method wraps the insertion statements in a transaction
+for improving performance. The exclusiveness of transactions is modeled in `rusqlite` at the
+type level by the `Connection` object being mutably (uniquely) borrowed for the duration of
+the transaction. This in turn means that `insert_batch()` also needs to mutably borrow. However,
+preparing and invoking queries needs an immutable borrow, and prepared statements borrow the
+`Connection` for as long as they live. As such, you may get errors like "cannot borrow `connection`
+mutably because it is also borrowed as immutable" when mixing batch insertion with other queries.
+There are two basic solutions to this problem:
+
+1. Drop the outstanding prepared statements before calling `ConnectionExt::insert_batch()`;
+2. Or if you can't do that, then obtain a transaction object that is not checked at compilation
+   time for exclusiveness, using `Connection::unchecked_transaction()`, then call the immutably
+   borrowing `TransactionExt::insert_batch()` method on the _transaction object_ instead.
+
+#### Notes on the test suite
+
+1. The tests try to exercise all features of the library extensively. For this reason, they
+   rely on most or all Cargo features defined in `Cargo.toml`. Consequently, for successfully
+   compiling and running all tests, you must pass `cargo test --all-features` to Cargo.
+
+2. The `compiletest_rs` crate is used for ensuring that the derive macros detect certain kinds of
+   errors, such as multiple primary keys or table-level constraints that reference non-existent
+   columns.
+
+   Due to the way the `compiletest_rs` crate is structured, the tests can be somewhat flaky. If you
+   encounter `E0464` errors (e.g., "multiple candidates for `rlib` dependency `nanosql` found"),
+   then run `cargo clean` before running `cargo test compile_fail --all-features`.
+
+**TL;DR:** the best "lazy" way to run tests is:
+
+```sh
+cargo clean && cargo test --all --all-features
 ```
