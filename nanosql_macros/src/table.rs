@@ -77,7 +77,20 @@ fn expand_struct(
     let primary_key = attrs_for_each_field
         .iter()
         .map(|field_attrs| {
-            field_attrs.primary_key.then_some(quote!(.pk()))
+            field_attrs.primary_key.then_some(quote!(.primary_key()))
+        });
+
+    let foreign_key = attrs_for_each_field
+        .iter()
+        .map(|field_attrs| {
+            field_attrs
+                .foreign_key
+                .as_ref()
+                .map(|fk| {
+                    let table = fk.table.unraw().to_string();
+                    let column = fk.column.unraw().to_string();
+                    quote!(.foreign_key(#table, #column))
+                })
         });
 
     let uniq_constraint = attrs_for_each_field
@@ -131,7 +144,7 @@ fn expand_struct(
         let columns = attrs.primary_key.iter().map(|item| item.as_str());
 
         Some(quote!{
-            .pk([#(#columns,)*])
+            .primary_key([#(#columns,)*])
         })
     };
 
@@ -154,6 +167,7 @@ fn expand_struct(
                                 )
                             )
                             #primary_key
+                            #foreign_key
                             #uniq_constraint
                             #check_constraint
                             #default_value

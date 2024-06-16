@@ -98,6 +98,8 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: marks the field as the PRIMARY KEY.
     #[deluxe(alias = pk, default = SpannedValue::new(false))]
     pub primary_key: SpannedValue<bool>,
+    #[deluxe(alias = fk)]
+    pub foreign_key: Option<FieldForeignKey>,
     /// For `#[derive(Table)]`: declares that the field must be unique.
     #[deluxe(default = false)]
     pub unique: bool,
@@ -110,6 +112,22 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: specifies that the column should be
     /// generated based on some expression involving other columns.
     pub generated: Option<GeneratedColumnSpec>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldForeignKey {
+    pub table: Ident,
+    pub column: Ident,
+}
+
+impl ParseMetaItem for FieldForeignKey {
+    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+        let table = Ident::parse_any(input)?.unraw();
+        let _: Token![::] = input.parse()?;
+        let column = Ident::parse_any(input)?.unraw();
+
+        Ok(FieldForeignKey { table, column })
+    }
 }
 
 #[derive(Clone, Debug)]

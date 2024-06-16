@@ -164,7 +164,7 @@ impl TableDesc {
     }
 
     /// Marks some columns as a primary key.
-    pub fn pk<I>(self, columns: I) -> Self
+    pub fn primary_key<I>(self, columns: I) -> Self
     where
         I: IntoIterator,
         I::Item: Into<String>,
@@ -178,7 +178,7 @@ impl TableDesc {
     /// The iterator must return columns in pairs,
     /// where the first item is a column in this table,
     /// and the second item is a column in the foreign table.
-    pub fn fk<T, I, K1, K2>(self, table: T, columns: I) -> Self
+    pub fn foreign_key<T, I, K1, K2>(self, table: T, columns: I) -> Self
     where
         T: Into<String>,
         I: IntoIterator<Item = (K1, K2)>,
@@ -249,12 +249,12 @@ impl Column {
     }
 
     /// Sets this column as the `PRIMARY KEY`.
-    pub fn pk(self) -> Self {
+    pub fn primary_key(self) -> Self {
         self.constrain(ColumnConstraint::PrimaryKey)
     }
 
     /// Set this column as a `FOREIGN KEY`.
-    pub fn fk(self, table: impl Into<String>, column: impl Into<String>) -> Self {
+    pub fn foreign_key(self, table: impl Into<String>, column: impl Into<String>) -> Self {
         self.constrain(ColumnConstraint::ForeignKey {
             table: table.into(),
             column: column.into(),
