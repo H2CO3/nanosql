@@ -33,7 +33,15 @@ struct ZipCode {
     country_code: String,
     #[nanosql(pk)]
     value: String,
-    //~^^ primary key declared at both the table and the column level
+    //~^^ ERROR primary key declared at both the table and the column level
+}
+
+/// A table-level primary key must not have duplicate columns.
+#[derive(Clone, Default, Debug, Param, Table)]
+#[nanosql(pk = ["unique_id", "unique_id"])]
+//~^ ERROR duplicate columns in primary key
+struct DuplicatePk {
+    unique_id: i32,
 }
 
 fn main() {}

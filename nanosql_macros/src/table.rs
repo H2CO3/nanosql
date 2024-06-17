@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use proc_macro2::TokenStream;
 use syn::Error;
 use syn::{DeriveInput, Data, Fields, FieldsNamed};
@@ -193,6 +194,14 @@ fn validate_primary_key(
             err_col,
             format_args!("unknown column `{err_col}` in primary key")
         ));
+    }
+
+    // ensure that the referenced columns are unique
+    let mut column_set = HashSet::new();
+    for col in table_pk_cols.as_slice() {
+        if !column_set.insert(col) {
+            return Err(Error::new_spanned(col, "duplicate columns in primary key"));
+        }
     }
 
     let mut column_pk_iter = field_attrs.iter().filter(|a| *a.primary_key);
