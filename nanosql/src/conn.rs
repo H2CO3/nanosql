@@ -1,10 +1,13 @@
 //! Working with top-level SQLite connections.
 
 use core::borrow::Borrow;
+use core::fmt::Write;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use crate::{
     query::Query,
-    table::{Table, InsertInput, Create, Insert},
+    table::{Table, InsertInput, CreateTable, Insert},
     stmt::CompiledStatement,
     error::{Error, Result},
     util::Sealed,
@@ -31,9 +34,9 @@ pub trait ConnectionExt: Sealed {
     }
 
     /// Creates the table represented by `T` if it does not yet exist.
-    fn create_table<T: Table>(&self) -> Result<()> {
-        self.compile_invoke(Create::<T>::default(), ())
-    }
+    ///
+    /// Also creates any necessary indexes (e.g. for foreign keys).
+    fn create_table<T: Table>(&self) -> Result<()>;
 
     /// Convenience method for inserting many rows into a table in one go.
     /// It prepares an `INSERT` statement and calls it in a loop, so it's
@@ -75,6 +78,40 @@ impl ConnectionExt for Connection {
         let statement = self.prepare_cached(sql.as_ref())?;
 
         Ok(CompiledStatement::new(statement))
+    }
+
+    fn create_table<T: Table>(&self) -> Result<()> {
+        // First, create the table itself.
+        self.compile_invoke(CreateTable::<T>::default(), ())?;
+
+        let desc = T::description();
+
+        // Then, create indexes: table-level and field-level, explicit and implicit
+        for index_cols in desc.index_specs() {
+            let index_hash = {
+                let mut state = DefaultHasher::new();
+                desc.name.hash(&mut state);
+                index_cols.hash(&mut state);
+                state.finish()
+            };
+            let mut sql = format!(
+                r#"CREATE INDEX IF NOT EXISTS "__nanosql_index_{table}_{hash:016x}" ON "{table}"("#,
+                hash = index_hash,
+                table = desc.name,
+            );
+            let mut sep = "";
+
+            for col in index_cols {
+                write!(sql, r#"{sep}\n    "{col_name}""#, col_name = col.name)?;
+                sep = ",";
+            }
+
+            sql.push_str("\n);");
+
+            self.prepare(&sql)?.execute([])?;
+        }
+
+        Ok(())
     }
 
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>

@@ -133,6 +133,8 @@ pub struct TableDesc {
     pub columns: Vec<Column>,
     /// The table-level constraints.
     pub constraints: BTreeSet<TableConstraint>,
+    /// The table-level indexes.
+    pub indexes: BTreeSet<Vec<ColumnIndexSpec>>,
 }
 
 impl TableDesc {
@@ -142,6 +144,7 @@ impl TableDesc {
             name: name.into(),
             columns: Vec::new(),
             constraints: BTreeSet::new(),
+            indexes: BTreeSet::new(),
         }
     }
 
@@ -213,6 +216,58 @@ impl TableDesc {
             condition: condition.into(),
         })
     }
+
+    /// Adds a table-level index, potentially on multiple columns.
+    pub fn add_index<S, I>(mut self, columns: I) -> Self
+    where
+        I: IntoIterator<Item = (S, SortOrder)>,
+        S: Into<String>
+    {
+        let column_specs = columns
+            .into_iter()
+            .map(|(name, sort_order)| ColumnIndexSpec {
+                name: name.into(),
+                sort_order,
+            })
+            .collect();
+
+        self.indexes.insert(column_specs);
+        self
+    }
+
+    /// Returns the index descriptions associated with this table.
+    ///
+    /// This includes explicit indexes added manually, and implicit
+    /// indexes (e.g., those created for `FOREIGN KEY` clauses).
+    pub fn index_specs(&self) -> impl Iterator<Item = Vec<ColumnIndexSpec>> + '_ {
+        // start with table-level explicit indexes
+        self.indexes
+            .iter()
+            .cloned()
+            .chain(self.constraints.iter().filter_map(|constraint| {
+                // then, append table-level implicit indexes (resulting from FKs etc.)
+                let TableConstraint::ForeignKey { column_pairs, .. } = constraint else {
+                    return None;
+                };
+                Some(
+                    column_pairs
+                        .iter()
+                        .map(|(own_name, _)| ColumnIndexSpec {
+                            name: own_name.clone(),
+                            sort_order: SortOrder::Ascending,
+                        })
+                        .collect()
+                )
+            }))
+            .chain(self.columns.iter().filter_map(|column| {
+                // then, append column-level explicit and implicit indexes as well
+                if let Some(index_spec) = column.index_spec() {
+                    Some(vec![index_spec])
+                } else {
+                    None
+                }
+            }))
+    }
 }
 
 /// Describes the name, type, and constraints on a particular column within a table.
@@ -224,6 +279,8 @@ pub struct Column {
     pub ty: Option<SqlTy>,
     /// The set of constraints imposed on the column.
     pub constraints: BTreeSet<ColumnConstraint>,
+    /// The index on this column, if any.
+    pub index: Option<SortOrder>,
 }
 
 impl Column {
@@ -233,6 +290,7 @@ impl Column {
             name: name.into(),
             ty: None,
             constraints: BTreeSet::new(),
+            index: None,
         }
     }
 
@@ -300,11 +358,39 @@ impl Column {
         }
     }
 
+    /// Adds an explicit index for this column.
+    pub fn set_index(mut self, sort_order: SortOrder) -> Self {
+        self.index = Some(sort_order);
+        self
+    }
+
     /// Returns `true` if and only if this column is generated.
     pub fn is_generated(&self) -> bool {
         self.constraints.iter().any(|constraint| {
             matches!(constraint, ColumnConstraint::Generated { .. })
         })
+    }
+
+    /// Returns the column name and the `SortOrder` associated with an index on this column,
+    /// if any. This may be either an explicit or an implicit index (e.g., a FOREIGN KEY).
+    pub fn index_spec(&self) -> Option<ColumnIndexSpec> {
+        // If there is an explicit index, always respect its order.
+        if let Some(sort_order) = self.index {
+            return Some(ColumnIndexSpec {
+                name: self.name.clone(),
+                sort_order
+            });
+        }
+
+        // If there's no explicit index, but there is a foreign
+        // key constraint, create an (ascending) implicit index.
+        self.constraints
+            .iter()
+            .find(|c| matches!(c, ColumnConstraint::ForeignKey { .. }))
+            .map(|_| ColumnIndexSpec {
+                name: self.name.clone(),
+                sort_order: SortOrder::Ascending,
+            })
     }
 }
 
@@ -475,6 +561,26 @@ impl Display for GeneratedColumnKind {
             GeneratedColumnKind::Stored  => "STORED",
         })
     }
+}
+
+/// Specifies whether sorting (in an index or in an `ORDER BY`
+/// clause) happens in ascending or descending order.
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum SortOrder {
+    /// Sort values in increasing numeric or lexicographical order.
+    #[default]
+    Ascending,
+    /// Sort values in decreasing numeric or lexicographical order.
+    Descending,
+}
+
+/// The properties of an index, corresponding to a single column.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ColumnIndexSpec {
+    /// The name of the indexed column.
+    pub name: String,
+    /// The order in which the values are sorted in the index.
+    pub sort_order: SortOrder,
 }
 
 /// A top-level constraint applied to an entire table at once.
@@ -770,29 +876,29 @@ impl<T: ?Sized + AsSqlTy> Display for ColumnConstraintFormatter<'_, T> {
 }
 
 /// A `CREATE TABLE IF NOT EXISTS` statement, for ensuring that this table exists.
-pub struct Create<T>(PhantomData<fn() -> T>);
+pub struct CreateTable<T>(PhantomData<fn() -> T>);
 
-impl<T> Clone for Create<T> {
+impl<T> Clone for CreateTable<T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T> Copy for Create<T> {}
+impl<T> Copy for CreateTable<T> {}
 
-impl<T> Default for Create<T> {
+impl<T> Default for CreateTable<T> {
     fn default() -> Self {
-        Create(PhantomData)
+        CreateTable(PhantomData)
     }
 }
 
-impl<T: Table> Debug for Create<T> {
+impl<T: Table> Debug for CreateTable<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Create").field(&T::description().name).finish()
+        f.debug_tuple("CreateTable").field(&T::description().name).finish()
     }
 }
 
-impl<T: Table> Query for Create<T> {
+impl<T: Table> Query for CreateTable<T> {
     type Input<'p> = ();
     type Output = ();
 

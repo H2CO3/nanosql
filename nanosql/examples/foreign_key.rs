@@ -1,4 +1,4 @@
-use nanosql::{Result, Query, Create};
+use nanosql::{Result, Query, CreateTable};
 use nanosql::{Param, ResultRecord, Table};
 
 
@@ -25,7 +25,7 @@ struct Employee {
 }
 
 fn do_it() -> Result<()> {
-    let query = Create::<Employee>::default();
+    let query = CreateTable::<Employee>::default();
     let sql = query.sql()?.as_ref().to_string();
 
     println!("{sql}");
