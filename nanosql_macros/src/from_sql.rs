@@ -99,9 +99,13 @@ fn expand_enum(
         .iter()
         .map(|v| {
             let var_attrs: FieldAttributes = deluxe::parse_attributes(v)?;
-            let var_name = var_attrs.rename.unwrap_or_else(|| {
-                attrs.rename_all.display(v.ident.unraw()).to_string()
-            });
+            let var_name = var_attrs.rename
+                .as_ref()
+                .map_or_else(
+                    || attrs.rename_all.display(v.ident.unraw()).to_string(),
+                    <_>::to_string,
+                );
+
             Ok(var_name)
         })
         .collect::<Result<_, Error>>()?;

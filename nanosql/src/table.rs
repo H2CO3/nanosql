@@ -261,11 +261,7 @@ impl TableDesc {
             }))
             .chain(self.columns.iter().filter_map(|column| {
                 // then, append column-level explicit and implicit indexes as well
-                if let Some(index_spec) = column.index_spec() {
-                    Some(vec![index_spec])
-                } else {
-                    None
-                }
+                column.index_spec().map(|index_spec| vec![index_spec])
             }))
     }
 }
@@ -526,7 +522,7 @@ impl Display for ColumnConstraint {
                 formatter.write_str("PRIMARY KEY")
             }
             ColumnConstraint::ForeignKey { table, column } => {
-                write!(formatter, r#"REFERENCES "{table}"("{column}")"#)
+                write!(formatter, r#"REFERENCES "{table}"("{column}") DEFERRABLE INITIALLY DEFERRED"#)
             }
             ColumnConstraint::Unique => {
                 formatter.write_str("UNIQUE")
@@ -642,7 +638,7 @@ impl Display for TableConstraint {
                     sep = ", ";
                 }
 
-                formatter.write_char(')')
+                formatter.write_str(") DEFERRABLE INITIALLY DEFERRED")
             }
             TableConstraint::Unique { columns } => {
                 formatter.write_str("UNIQUE(")?;

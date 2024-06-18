@@ -2,8 +2,6 @@
 
 use core::borrow::Borrow;
 use core::fmt::Write;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use crate::{
     query::Query,
@@ -87,22 +85,16 @@ impl ConnectionExt for Connection {
         let desc = T::description();
 
         // Then, create indexes: table-level and field-level, explicit and implicit
-        for index_cols in desc.index_specs() {
-            let index_hash = {
-                let mut state = DefaultHasher::new();
-                desc.name.hash(&mut state);
-                index_cols.hash(&mut state);
-                state.finish()
-            };
+        for (i, index_cols) in desc.index_specs().enumerate() {
             let mut sql = format!(
-                r#"CREATE INDEX IF NOT EXISTS "__nanosql_index_{table}_{hash:016x}" ON "{table}"("#,
-                hash = index_hash,
+                r#"CREATE INDEX IF NOT EXISTS "__nanosql_index_{table}_{id}" ON "{table}"("#,
                 table = desc.name,
+                id = i + 1,
             );
             let mut sep = "";
 
             for col in index_cols {
-                write!(sql, r#"{sep}\n    "{col_name}""#, col_name = col.name)?;
+                write!(sql, "{sep}\n    \"{col}\"", col = col.name)?;
                 sep = ",";
             }
 

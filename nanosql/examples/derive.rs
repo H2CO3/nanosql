@@ -1,6 +1,7 @@
 use nanosql::{Result, Connection, ConnectionExt};
 use nanosql::{AsSqlTy, ToSql, FromSql, Param, ResultRecord, Table, InsertInput};
 
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, AsSqlTy, ToSql, FromSql)]
 #[nanosql(rename_all = "lower_snake_case")]
 enum MusicalInstrumentKind {
@@ -50,6 +51,8 @@ struct Hierarchy {
     /// the `primary_key` directive must respect the `rename` attribute
     #[nanosql(rename = "other_name")]
     subsection: u64,
+    /// the `rename` attribute accepts either an identifier or a string literal
+    #[nanosql(rename = renamed_column_ident)]
     value: f32,
 }
 

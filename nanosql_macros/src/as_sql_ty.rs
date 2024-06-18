@@ -80,9 +80,12 @@ fn expand_enum(
 
             if matches!(v.fields, Fields::Unit) {
                 let sep = if i == 0 { "" } else { ", " };
-                let var = var_attrs.rename.unwrap_or_else(|| {
-                    attrs.rename_all.display(v.ident.unraw()).to_string()
-                });
+                let var = var_attrs.rename
+                    .as_ref()
+                    .map_or_else(
+                        || attrs.rename_all.display(v.ident.unraw()).to_string(),
+                        <_>::to_string,
+                    );
 
                 Ok(format!("{sep}'{var}'"))
             } else {

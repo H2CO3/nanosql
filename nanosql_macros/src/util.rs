@@ -1,4 +1,5 @@
 use core::fmt::{self, Display, Formatter, Write};
+use std::hash::{Hash, Hasher};
 use std::collections::HashSet;
 use proc_macro::TokenStream as TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
@@ -72,17 +73,19 @@ pub struct ContainerAttributes {
     #[deluxe(default = parse_quote!('p))]
     pub insert_input_lt: Lifetime,
     /// For `#[derive(Table)]`: the name of the table itself.
-    pub rename: Option<String>,
+    pub rename: Option<IdentOrStr>,
     /// For `#[derive(InsertInput)]`: the `Table` associated type of the insert input.
     pub table: Option<Type>,
     /// For various macros: rename all fields or variants,
     /// according to the specified case conversion.
-    #[deluxe(default)]
-    #[deluxe(with = deluxe::with::syn)]
+    #[deluxe(default, with = deluxe::with::syn)]
     pub rename_all: CaseConversion,
     /// For `#[derive(Table)]`: the Primary Key columns.
-    #[deluxe(default, alias = pk)]
-    pub primary_key: SpannedValue<Vec<SpannedValue<String>>>,
+    #[deluxe(alias = pk)]
+    pub primary_key: Option<SpannedValue<Vec<IdentOrStr>>>,
+    /// For `#[derive(Table)]`: the Foreign Key columns.
+    #[deluxe(append, alias = fk)]
+    pub foreign_key: Vec<TableForeignKey>,
 }
 
 /// Attributes on a struct field or an enum variant.
@@ -91,7 +94,7 @@ pub struct ContainerAttributes {
 pub struct FieldAttributes {
     /// For various derive macros: parse and serialize the field or variant
     /// with the given name, instead of the original field or variant name.
-    pub rename: Option<String>,
+    pub rename: Option<IdentOrStr>,
     /// For `#[derive(Table)]`: specifies an alternate SQL type source
     /// (`AsSqlTy`) for the column, instead of using the field's type.
     pub sql_ty: Option<Type>,
@@ -116,17 +119,50 @@ pub struct FieldAttributes {
 
 #[derive(Clone, Debug)]
 pub struct FieldForeignKey {
-    pub table: Ident,
-    pub column: Ident,
+    pub table: IdentOrStr,
+    pub column: IdentOrStr,
 }
 
 impl ParseMetaItem for FieldForeignKey {
     fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
-        let table = Ident::parse_any(input)?.unraw();
-        let _: Token![::] = input.parse()?;
-        let column = Ident::parse_any(input)?.unraw();
+        let table: IdentOrStr = input.parse()?;
+
+        let lookahead = input.lookahead1();
+        if lookahead.peek(Token![=>]) {
+            let _: Token![=>] = input.parse()?;
+        } else if lookahead.peek(Token![::]) {
+            let _: Token![::] = input.parse()?;
+        } else {
+            return Err(lookahead.error());
+        }
+
+        let column: IdentOrStr = input.parse()?;
 
         Ok(FieldForeignKey { table, column })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TableForeignKey {
+    pub table: IdentOrStr,
+    pub columns: Punctuated<(IdentOrStr, IdentOrStr), Token![,]>,
+}
+
+impl ParseMetaItem for TableForeignKey {
+    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+        let table: IdentOrStr = input.parse()?;
+        let _: Token![=>] = input.parse()?;
+        let paren_inner;
+        let _ = syn::parenthesized!(paren_inner in input);
+
+        let columns = Punctuated::parse_terminated_with(&paren_inner, |stream| {
+            let this: IdentOrStr = stream.parse()?;
+            let _: Token![=] = stream.parse()?;
+            let other: IdentOrStr = stream.parse()?;
+            Ok((this, other))
+        })?;
+
+        Ok(TableForeignKey { table, columns })
     }
 }
 
@@ -155,12 +191,12 @@ pub enum GeneratedColumnMode {
 
 impl Parse for GeneratedColumnMode {
     fn parse(input: ParseStream) -> Result<Self, Error> {
-        let ident = Ident::parse_any(input)?;
+        let mode: IdentOrStr = input.parse()?;
 
-        match ident.unraw().to_string().as_str() {
+        match mode.to_string().as_str() {
             "virtual" => Ok(GeneratedColumnMode::Virtual),
             "stored" => Ok(GeneratedColumnMode::Stored),
-            _ => Err(Error::new_spanned(ident, "generated column must be `virtual` or `stored`")),
+            _ => Err(Error::new_spanned(mode, "generated column must be `virtual` or `stored`")),
         }
     }
 }
@@ -289,28 +325,20 @@ pub enum CaseConversion {
 
 impl Parse for CaseConversion {
     fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
-        let lookahead = stream.lookahead1();
+        let raw: IdentOrStr = stream.parse()?;
 
-        if lookahead.peek(LitStr) {
-            stream.parse::<LitStr>()?.parse()
-        } else if lookahead.peek(Ident::peek_any) {
-            let s = Ident::parse_any(stream)?;
-
-            Ok(match s.to_string().as_str() {
-                "identity" => CaseConversion::Identity,
-                "lower_snake_case" => CaseConversion::LowerSnakeCase,
-                "UPPER_SNAKE_CASE" => CaseConversion::UpperSnakeCase,
-                "lowerCamelCase" => CaseConversion::LowerCamelCase,
-                "UpperCamelCase" => CaseConversion::UpperCamelCase,
-                "lower-kebab-case" => CaseConversion::LowerKebabCase,
-                "UPPER-KEBAB-CASE" => CaseConversion::UpperKebabCase,
-                "Title Case" => CaseConversion::TitleCase,
-                "Train-Case" => CaseConversion::TrainCase,
-                _ => return Err(Error::new_spanned(s, "invalid case conversion method")),
-            })
-        } else {
-            Err(lookahead.error())
-        }
+        Ok(match raw.to_string().as_str() {
+            "identity" => CaseConversion::Identity,
+            "lower_snake_case" => CaseConversion::LowerSnakeCase,
+            "UPPER_SNAKE_CASE" => CaseConversion::UpperSnakeCase,
+            "lowerCamelCase" => CaseConversion::LowerCamelCase,
+            "UpperCamelCase" => CaseConversion::UpperCamelCase,
+            "lower-kebab-case" => CaseConversion::LowerKebabCase,
+            "UPPER-KEBAB-CASE" => CaseConversion::UpperKebabCase,
+            "Title Case" => CaseConversion::TitleCase,
+            "Train-Case" => CaseConversion::TrainCase,
+            _ => return Err(Error::new_spanned(&raw, "invalid case conversion method")),
+        })
     }
 }
 
@@ -344,5 +372,65 @@ impl<T: Display> Display for CaseConversionDisplay<T> {
             TitleCase      => AsTitleCase(self.value.to_string()).fmt(formatter),
             TrainCase      => AsTrainCase(self.value.to_string()).fmt(formatter),
         }
+    }
+}
+
+/// A generic helper for parsing a string from either a string literal or an identifier.
+#[derive(Clone, Eq, Debug)]
+pub enum IdentOrStr {
+    Ident(Ident),
+    Str(LitStr),
+}
+
+impl Parse for IdentOrStr {
+    fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
+        let lookahead = stream.lookahead1();
+
+        if lookahead.peek(Ident::peek_any) {
+            Ident::parse_any(stream).map(|ident| IdentOrStr::Ident(ident.unraw()))
+        } else if lookahead.peek(LitStr) {
+            stream.parse::<LitStr>().map(IdentOrStr::Str)
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+
+impl ParseMetaItem for IdentOrStr {
+    fn parse_meta_item(stream: ParseStream<'_>, _: deluxe::ParseMode) -> Result<Self, Error> {
+        <IdentOrStr as Parse>::parse(stream)
+    }
+}
+
+impl ToTokens for IdentOrStr {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        match self {
+            IdentOrStr::Ident(ident) => {
+                let lit = LitStr::new(&ident.to_string(), ident.span());
+                lit.to_tokens(tokens);
+            }
+            IdentOrStr::Str(lit) => lit.to_tokens(tokens)
+        }
+    }
+}
+
+impl Display for IdentOrStr {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            IdentOrStr::Ident(ident) => Display::fmt(ident, formatter),
+            IdentOrStr::Str(lit) => Display::fmt(&lit.value(), formatter),
+        }
+    }
+}
+
+impl PartialEq for IdentOrStr {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_string() == other.to_string()
+    }
+}
+
+impl Hash for IdentOrStr {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.to_string().hash(state);
     }
 }

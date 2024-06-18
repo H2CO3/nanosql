@@ -5,7 +5,9 @@ use syn::{DeriveInput, Data, Fields, FieldsNamed};
 use syn::ext::IdentExt;
 use quote::quote;
 use deluxe::SpannedValue;
-use crate::util::{ContainerAttributes, FieldAttributes, GeneratedColumnMode};
+use crate::util::{
+    ContainerAttributes, FieldAttributes, GeneratedColumnMode, TableForeignKey, IdentOrStr
+};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
@@ -45,7 +47,10 @@ fn expand_struct(
     fields: &FieldsNamed,
 ) -> Result<TokenStream, Error> {
     let ty_name = &input.ident;
-    let table_name = attrs.rename.unwrap_or_else(|| ty_name.unraw().to_string());
+    let table_name = attrs.rename
+        .as_ref()
+        .map_or_else(|| ty_name.unraw().to_string(), <_>::to_string);
+
     let insert_input_ty = attrs.insert_input_ty;
     let insert_input_lt = attrs.insert_input_lt;
 
@@ -60,13 +65,17 @@ fn expand_struct(
         .map(|(f, field_attrs)| {
             let field_name = f.ident.as_ref().expect("named field is unnamed?");
 
-            field_attrs.rename.clone().unwrap_or_else(|| {
-                attrs.rename_all.display(field_name.unraw()).to_string()
-            })
+            field_attrs.rename
+                .as_ref()
+                .map_or_else(
+                    || attrs.rename_all.display(field_name).to_string(),
+                    <_>::to_string,
+                )
         })
         .collect();
 
-    validate_primary_key(&attrs.primary_key, &attrs_for_each_field, &col_name_str)?;
+    validate_primary_key(attrs.primary_key.as_ref(), &attrs_for_each_field, &col_name_str)?;
+    validate_foreign_keys(&attrs.foreign_key, &attrs_for_each_field, &col_name_str)?;
 
     let col_ty = fields.named
         .iter()
@@ -88,8 +97,8 @@ fn expand_struct(
                 .foreign_key
                 .as_ref()
                 .map(|fk| {
-                    let table = fk.table.unraw().to_string();
-                    let column = fk.column.unraw().to_string();
+                    let table = &fk.table;
+                    let column = &fk.column;
                     quote!(.foreign_key(#table, #column))
                 })
         });
@@ -135,19 +144,23 @@ fn expand_struct(
             })
         });
 
-    let table_primary_key = if attrs.primary_key.is_empty() {
-        None
-    } else {
-        // must extract the strings manually, since `impl ToTokens for SpannedValue` is bogus.
-        // see:
-        // - https://github.com/jf2048/deluxe/issues/21
-        // - https://github.com/jf2048/deluxe/pull/22
-        let columns = attrs.primary_key.iter().map(|item| item.as_str());
-
-        Some(quote!{
+    let table_primary_key = attrs.primary_key.as_ref().map(|pk| {
+        let columns = pk.iter();
+        quote!{
             .primary_key([#(#columns,)*])
-        })
-    };
+        }
+    });
+    let table_foreign_keys = attrs.foreign_key
+        .iter()
+        .map(|fk_spec| {
+            let table_name = &fk_spec.table;
+            let own_cols = fk_spec.columns.iter().map(|pair| &pair.0);
+            let other_cols = fk_spec.columns.iter().map(|pair| &pair.1);
+
+            quote!{
+                .foreign_key(#table_name, [#((#own_cols, #other_cols),)*])
+            }
+        });
 
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
@@ -176,39 +189,49 @@ fn expand_struct(
                     )
                 )*
                 #table_primary_key
+                #(#table_foreign_keys)*
             }
         }
     })
 }
 
 fn validate_primary_key(
-    table_pk_cols: &SpannedValue<Vec<SpannedValue<String>>>,
+    table_pk_cols: Option<&SpannedValue<Vec<IdentOrStr>>>,
     field_attrs: &[FieldAttributes],
     all_cols: &[String],
 ) -> Result<(), Error> {
     assert_eq!(field_attrs.len(), all_cols.len());
 
-    // ensure that columns referenced in the table-level PK do in fact exist
-    if let Some(err_col) = table_pk_cols.iter().find(|col| !all_cols.contains(col)) {
-        return Err(Error::new_spanned(
-            err_col,
-            format_args!("unknown column `{err_col}` in primary key")
-        ));
-    }
+    // if the table-level PK is declared, check it
+    if let Some(table_pk_cols) = table_pk_cols {
+        // ensure that there is at least 1 column in the PK
+        if table_pk_cols.is_empty() {
+            return Err(Error::new_spanned(table_pk_cols, "primary key may not be an empty tuple"));
+        }
 
-    // ensure that the referenced columns are unique
-    let mut column_set = HashSet::new();
-    for col in table_pk_cols.as_slice() {
-        if !column_set.insert(col) {
-            return Err(Error::new_spanned(col, "duplicate columns in primary key"));
+        // ensure that columns referenced in the table-level PK do in fact exist
+        if let Some(err_col) = table_pk_cols.iter().find(|col| !all_cols.contains(&col.to_string())) {
+            return Err(Error::new_spanned(
+                err_col,
+                format_args!("unknown column `{err_col}` in primary key")
+            ));
+        }
+
+        // ensure that the referenced columns are unique
+        let mut column_set = HashSet::new();
+        for col in table_pk_cols.as_slice() {
+            if !column_set.insert(col) {
+                return Err(Error::new_spanned(col, "duplicate columns in primary key"));
+            }
         }
     }
 
+    // always check the field-level PK attributes
     let mut column_pk_iter = field_attrs.iter().filter(|a| *a.primary_key);
 
     if let Some(column_pk) = column_pk_iter.next() {
         // ensure that a column-level PK does not conflict with the table-level PK
-        if !table_pk_cols.is_empty() {
+        if table_pk_cols.is_some() {
             return Err(Error::new_spanned(
                 column_pk.primary_key,
                 "primary key declared at both the table and the column level"
@@ -223,6 +246,67 @@ fn validate_primary_key(
             ));
         }
     }
+
+    Ok(())
+}
+
+fn validate_foreign_keys(
+    table_fk_specs: &[TableForeignKey],
+    field_attrs: &[FieldAttributes],
+    all_cols: &[String],
+) -> Result<(), Error> {
+    table_fk_specs
+        .iter()
+        .try_for_each(|fk| validate_one_foreign_key(fk, field_attrs, all_cols))
+}
+
+fn validate_one_foreign_key(
+    table_fk_spec: &TableForeignKey,
+    field_attrs: &[FieldAttributes],
+    all_cols: &[String],
+) -> Result<(), Error> {
+    assert_eq!(field_attrs.len(), all_cols.len());
+
+    // ensure that the foreign key spec contains at least 1 column
+    if table_fk_spec.columns.is_empty() {
+        return Err(Error::new_spanned(
+            &table_fk_spec.table,
+            "foreign key may not be an empty tuple"
+        ));
+    }
+
+    // ensure that supposedly _referencing_ columns do in fact exist in _this_ table
+    if let Some(err_col) = table_fk_spec.columns
+        .iter()
+        .find_map(|(col, _)| {
+            if all_cols.contains(&col.to_string()) {
+                None
+            } else {
+                Some(col)
+            }
+        })
+    {
+        return Err(Error::new_spanned(
+            err_col,
+            format_args!("unknown column `{err_col}` in foreign key")
+        ));
+    }
+
+    // ensure that both the referencing and the referenced columns are unique
+    let mut referencing_columns = HashSet::new();
+    let mut referenced_columns = HashSet::new();
+
+    for (own, other) in &table_fk_spec.columns {
+        if !referencing_columns.insert(own) {
+            return Err(Error::new_spanned(own, "duplicate referencing column in foreign key"));
+        }
+        if !referenced_columns.insert(other) {
+            return Err(Error::new_spanned(other, "duplicate referenced column in foreign key"));
+        }
+    }
+
+    // Unlike a PRIMARY KEY, there may be more than one FOREIGN KEY on a table,
+    // so we don't need to check for that kind of (non-)conflict. Yay! \o/
 
     Ok(())
 }

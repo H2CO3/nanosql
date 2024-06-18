@@ -2,7 +2,6 @@ use proc_macro2::TokenStream;
 use syn::{Error, WhereClause};
 use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields, FieldsNamed, FieldsUnnamed};
 use syn::parse_quote;
-use syn::ext::IdentExt;
 use quote::quote;
 use crate::util::{add_bounds, ContainerAttributes, FieldAttributes};
 
@@ -75,9 +74,12 @@ fn expand_named_fields(
         // part for naming the column, because that's what people expect.
         // However, still use the original field name in the field access
         // expression, otherwise raw identifiers would cause a syntax error.
-        let column_name = field_attrs.rename.unwrap_or_else(|| {
-            attrs.rename_all.display(field_name.unraw()).to_string()
-        });
+        let column_name = field_attrs.rename
+            .as_ref()
+            .map_or_else(
+                || attrs.rename_all.display(field_name).to_string(),
+                <_>::to_string,
+            );
 
         field_names.push(field_name);
         column_names.push(column_name);
