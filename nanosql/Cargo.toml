@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-rusqlite = "0.31.0"
+rusqlite = { version = "0.31.0", features = ["modern_sqlite"] }
 thiserror = "1.0.61"
 ordered-float = { version = "4.2.0", optional = true }
 nanosql_macros = { path = "../nanosql_macros", version = "0.1.0", optional = true }

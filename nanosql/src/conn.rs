@@ -7,6 +7,7 @@ use crate::{
     query::Query,
     table::{Table, InsertInput, CreateTable, Insert},
     stmt::CompiledStatement,
+    explain::{ExplainVdbeProgram, VdbeInstruction, ExplainQueryPlan, QueryPlanNode},
     error::{Error, Result},
     util::Sealed,
 };
@@ -68,6 +69,16 @@ pub trait ConnectionExt: Sealed {
     where
         I: IntoIterator,
         I::Item: InsertInput<'p>;
+
+    /// Explains the VDBE bytecode program generated for a query/statement.
+    fn explain_vdbe_program<Q: Query>(&self, query: Q) -> Result<Vec<VdbeInstruction>> {
+        self.compile_invoke(ExplainVdbeProgram::from(query), ())
+    }
+
+    /// Explains the high-level query plan generated for a query/statement.
+    fn explain_query_plan<Q: Query>(&self, query: Q) -> Result<Vec<QueryPlanNode>> {
+        self.compile_invoke(ExplainQueryPlan::from(query), ())
+    }
 }
 
 impl ConnectionExt for Connection {

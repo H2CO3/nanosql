@@ -10,6 +10,7 @@ pub mod query;
 pub mod table;
 pub mod stmt;
 pub mod conn;
+pub mod explain;
 pub mod error;
 
 pub extern crate rusqlite;

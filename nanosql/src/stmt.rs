@@ -33,8 +33,17 @@ impl<'conn, Q: Query> CompiledStatement<'conn, Q> {
         // Bind parameters.
         // Clear bindings upfront so that params from the previous invocation
         // don't stick around accidentally.
-        self.statement.clear_bindings();
-        params.borrow().bind(&mut self.statement)?;
+        //
+        // Oddly enough, an `EXPLAIN (QUERY PLAN)` statement retains all of
+        // the parameters of the child statement being explained. Since there's
+        // nothing to bind to the parameters when explaining, the parameter type
+        // of `Explain` is `()`, but that upsets the `Param` impls, leading to a
+        // `ParamCountMismatch` error. Therefore we only actually bind parameters
+        // when this query is is _not_ an EXPLAIN or EXPLAIN QUERY PLAN statement.
+        if self.statement.is_explain() == 0 {
+            self.statement.clear_bindings();
+            params.borrow().bind(&mut self.statement)?;
+        }
 
         // Execute query and extract returned rows.
         // (we don't need raw_execute, as deserialization works correctly for
