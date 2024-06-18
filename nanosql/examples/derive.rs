@@ -57,9 +57,14 @@ struct Hierarchy {
 }
 
 nanosql::define_query! {
+    /// Inserts an instrument of the given kind, using the default value for its `make` column.
+    #[derive(Clone, Copy, Default, Debug)]
     InsertUnknownInstrument<'p>: (u32, MusicalInstrumentKind) => () {
         "INSERT INTO musical_instrument(id, kind) VALUES (?, ?)"
     }
+
+    /// Returns the instrument with the given ID if it exists.
+    #[derive(Clone, Copy, Default, Debug)]
     InstrumentById<'p>: u32 => Option<MusicalInstrument> {
         "SELECT id, kind, make, description FROM musical_instrument WHERE id = ?"
     }

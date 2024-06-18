@@ -79,7 +79,10 @@ where
 /// }
 /// ```
 ///
-/// The query name may be preceded by a visibility specifier (e.g. `pub`) to control the scope.
+/// The query name may be preceded by a visibility specifier (e.g. `pub`) to control the scope,
+/// just like normal Rust UDT declarations. Likewise, it may also be preceded by `#[attributes]`
+/// such as `#[derive(Clone, Copy, Default)]` or documentation comments (which expand to such
+/// an attribute). These will all be forwarded to the definition of the query type itsef.
 ///
 /// The macro brings the lifetime `'lt` into scope when binding the input type, so
 /// you can use it for defining the input type as a reference or reference-like type.
@@ -173,9 +176,10 @@ where
 #[macro_export]
 macro_rules! define_query {
     ($(
+        $(#[$($attrs:tt)*])*
         $vis:vis $tyname:ident<$lt:lifetime>: $input_ty:ty => $output_ty:ty { $sql:expr }
     )*) => {$(
-        #[derive(Clone, Copy, Default, Debug)]
+        $(#[$($attrs)*])*
         $vis struct $tyname;
 
         impl ::nanosql::Query for $tyname {

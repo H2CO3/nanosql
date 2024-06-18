@@ -49,8 +49,9 @@ struct BogusTable {
     other_col: u32,
 }
 
-// an internal helper query to gather information about indexes
 nanosql::define_query!{
+    /// Internal helper query for gathering information about indexes
+    #[derive(Clone, Copy, Default, Debug)]
     ListTableIndexes<'p>: &'p str => Vec<Option<String>> {
         "SELECT sql FROM sqlite_schema WHERE type = 'index' AND tbl_name = ?"
     }
