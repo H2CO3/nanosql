@@ -1,28 +1,43 @@
-## NanoSQL: a tiny, strongly-typed data mapper for SQLite
+# NanoSQL: a tiny, strongly-typed data mapper for SQLite
 
 NanoSQL is a small data mapper library that helps you execute SQL statements with typed
 parameters and a typed result set. It does **not** attempt to typecheck your SQL code.
 Rather, it only ensures that the parameters and results serialize/deserialize to/from
 the correct shape.
 
-### Architecture
+## Overview
 
 The library is structured around prepared statements. First, you create a description
-of the interface and implementatino of your query. This is realized by the `Query` trait
+of the interface and implementation of your query. This is realized by the [`Query`] trait
 that contains the input (parameter) and output (result) types as associated types, and
-a function for building the SQL text.
+a function for building the SQL text. You can imeplement this trait by hand, or use the
+[`define_query`] macro as a convenient shortcut.
 
-Next, you use a `rusqlite::Connection` object to compile the `Query` into a `CompiledStatement`.
-This wraps a prepared statement and restricts its parameter and return types.
+Next, you use [`Connection::compile()`] to compile the `Query` into a [`CompiledStatement`].
+This wraps an SQLite prepared statement, but restricts its parameter and return types.
 
-Finally, you call the `invoke()` function on your compiled statement to actually query the database.
+Finally, you call the [`CompiledStatement::invoke()`] function on your compiled statement
+to actually query the database:
+
+* The input of a query is any type that implements the [`Param`] trait. These include primitives,
+  optionals of primitives, tuples of primitives or optionals, and structs with fields of primitive
+  or optional types. Nanosql can work with both positional and named arguments, and supports all
+  parameter prefixes accepted by SQLite (`?`, `:`, `@`, and `$`). This trait can be derived if the
+  `derive` feature of the crate is activated.
+* The output of a query is a type that implements the [`ResultSet`] trait. This is most commonly
+  a collection of some sort (e.g., the standard `Vec` type), or any other type that aggregates
+  the rows returned from an SQL query into a meaningful data structure. Notably, `Option<T>` and
+  [`Single`]`<T>` can be used for expecting at most one or exactly one record, respectively. These
+  types implement `ResultSet` when the type of their wrapped value implements [`ResultRecord`].
+* [`ResultRecord`] is a trait that can be implemented by tuple-like and struct-like types for
+  deserializing individual rows. This trait can also be `#[derive]`d.
 
 Extremely common (basically inevitable) tasks such as creating the schema of a table and
-inserting records is possible via special helper/extension methods on `Connection` objects.
-These make use of the `Table` trait for preparing and executing the corresponding SQL statements
-and can be called for convenience.
+inserting records is possible via special helper/extension methods on `Connection` objects,
+via the [`ConnectionExt`] trait. These in turn use the [`Table`] trait for preparing and
+invoking the corresponding SQL statements, and can be called for convenience.
 
-### Examples
+## Examples
 
 The absolute basics - create a table, insert a bunch of records into it, then retrieve them:
 
@@ -180,23 +195,34 @@ fn main() -> Result<()> {
 }
 ```
 
-### A note about batch insertion and transactions
+## A note about batch insertion and transactions
 
-The `ConnectionExt::insert_batch()` method wraps the insertion statements in a transaction
+The [`ConnectionExt::insert_batch()`] method wraps the insertion statements in a transaction
 for improving performance. The exclusiveness of transactions is modeled in `rusqlite` at the
-type level by the `Connection` object being mutably (uniquely) borrowed for the duration of
+type level by the [`Connection`] object being mutably (uniquely) borrowed for the duration of
 the transaction. This in turn means that `insert_batch()` also needs to mutably borrow. However,
 preparing and invoking queries needs an immutable borrow, and prepared statements borrow the
 `Connection` for as long as they live. As such, you may get errors like "cannot borrow `connection`
 mutably because it is also borrowed as immutable" when mixing batch insertion with other queries.
 There are two basic solutions to this problem:
 
-1. Drop the outstanding prepared statements before calling `ConnectionExt::insert_batch()`;
+1. Drop the outstanding prepared statements before calling [`ConnectionExt::insert_batch()`];
 2. Or if you can't do that, then obtain a transaction object that is not checked at compilation
-   time for exclusiveness, using `Connection::unchecked_transaction()`, then call the immutably
-   borrowing `TransactionExt::insert_batch()` method on the _transaction object_ instead.
+   time for exclusiveness, using [`Connection::unchecked_transaction()`], then call the immutably
+   borrowing [`TransactionExt::insert_batch()`] method on the _transaction object_ instead.
 
-#### Notes on the test suite
+## Cargo Features
+
+* `derive`: activates procedural macros - mostly custom `#[derive]`s for commonly-used traits.
+* `not-nan`: implements `Param` and `ResultRecord` for `ordered_float::NotNan`. This allows for
+  a more type-safe interface in queries: since SQLite treats `NaN` as the SQL `NULL` value, you
+  may run into surprising errors when binding or retrieving an `f32::NAN` or `f64::NAN` and the
+  corresponding parameter needs to be `NOT NULL`, or the soruce column *can* be `NULL`.
+* `pretty-eqp`: use the `ptree` crate to pretty print the results of `EXPLAIN QUERY PLAN`. This
+  will impl `Display` for `QueryPlan`, the return type of [`ConnectionExt::explain_query_plan()`],
+  which renders the tree in a nice, human-readable format using ASCII art.
+
+## Notes on the test suite
 
 1. The tests try to exercise all features of the library extensively. For this reason, they
    rely on most or all Cargo features defined in `Cargo.toml`. Consequently, for successfully
@@ -213,5 +239,7 @@ There are two basic solutions to this problem:
 **TL;DR:** the best "lazy" way to run tests is:
 
 ```sh
-cargo clean && cargo test --all --all-features
+cargo clean
+cargo test --all-features --all
+cargo test --all-features --examples
 ```

@@ -22,7 +22,7 @@ pub use rusqlite::{
 pub use query::Query;
 pub use table::{Table, InsertInput, TableDesc, Column, SqlTy, TyPrim, AsSqlTy, Insert};
 pub use stmt::CompiledStatement;
-pub use conn::ConnectionExt;
+pub use conn::{ConnectionExt, TransactionExt};
 pub use param::{Param, ParamPrefix};
 pub use row::{ResultRecord, ResultSet, Single};
 pub use error::{Error, Result};
