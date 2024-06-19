@@ -1,6 +1,6 @@
 //! Meta-queries for high-level query plan and low-level bytecode program debugging
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use thiserror::Error;
 use rusqlite::{Row, Rows, types::Value};
 use crate::query::Query;
@@ -369,7 +369,7 @@ fn build_query_plan_tree(
     let (capacity, _) = iter.size_hint();
 
     let mut node_ids = HashSet::with_capacity(capacity.saturating_add(1)); // +1 for the root
-    let mut children_by_parent_id = HashMap::<i64, Vec<_>>::with_capacity(capacity);
+    let mut children_by_parent_id = BTreeMap::<i64, Vec<_>>::new();
 
     node_ids.insert(root.id);
 
@@ -410,7 +410,7 @@ fn build_query_plan_tree(
 
 fn build_recursively_from_parent_map(
     mut root: QueryPlanNode,
-    children_by_parent_id: &mut HashMap<i64, Vec<QueryPlanNode>>,
+    children_by_parent_id: &mut BTreeMap<i64, Vec<QueryPlanNode>>,
 ) -> Result<QueryPlanNode, QueryPlanBuildError> {
     if !root.children.is_empty() {
         return Err(QueryPlanBuildError {
@@ -429,12 +429,16 @@ fn build_recursively_from_parent_map(
         root.children.push(subtree);
     }
 
+    // this is not strictly necessary, only here to make testing easier.
+    root.children.sort_unstable_by_key(|node| node.id);
+
     Ok(root)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{Connection, ConnectionExt, Result, define_query};
+    use super::{build_query_plan_tree, QueryPlanNode, QueryPlanBuildError, QueryPlanBuildErrorKind};
 
     define_query!{
         /// Example taken directly from: https://sqlite.org/eqp.html#subqueries
@@ -459,5 +463,217 @@ mod tests {
         assert!(!eqp.root.children.is_empty());
 
         Ok(())
+    }
+
+    #[test]
+    fn empty_tree() -> Result<(), QueryPlanBuildError> {
+        assert!(build_query_plan_tree([])?.children.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn singleton_tree() -> Result<(), QueryPlanBuildError> {
+        let tree = build_query_plan_tree([
+            QueryPlanNode {
+                id: 137,
+                parent: Some(0),
+                ..QueryPlanNode::default()
+            },
+        ])?;
+
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].id, 137);
+
+        Ok(())
+    }
+
+    #[test]
+    fn complex_tree() -> Result<(), QueryPlanBuildError> {
+        let root = build_query_plan_tree([
+            QueryPlanNode {
+                id: 12,
+                parent: Some(10),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 5,
+                parent: Some(10),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 10,
+                parent: Some(0),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 7,
+                parent: Some(5),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 1,
+                parent: Some(5),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 6,
+                parent: Some(12),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 8,
+                parent: Some(1),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 11,
+                parent: Some(0),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 3,
+                parent: Some(0),
+                ..QueryPlanNode::default()
+            },
+        ])?;
+
+        assert_eq!(root.id, 0);
+        assert_eq!(
+            root.children.iter().map(|node| node.id).collect::<Vec<_>>(),
+            [3, 10, 11]
+        );
+
+        assert!(root.children[0].children.is_empty());
+        assert!(root.children[2].children.is_empty());
+
+        assert_eq!(
+            root.children[1].children.iter().map(|node| node.id).collect::<Vec<_>>(),
+            [5, 12]
+        );
+
+        assert_eq!(root.children[1].children[0].children.len(), 2);
+        assert_eq!(root.children[1].children[0].children[0].id, 1);
+        assert_eq!(root.children[1].children[0].children[1].id, 7);
+
+        assert_eq!(root.children[1].children[1].children.len(), 1);
+        assert_eq!(root.children[1].children[1].children[0].id, 6);
+
+        assert_eq!(root.children[1].children[0].children[0].children.len(), 1);
+        assert_eq!(root.children[1].children[0].children[0].children[0].id, 8);
+
+        assert!(root.children[1].children[0].children[0].children[0].children.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn cyclic_graph_direct() {
+        let result = build_query_plan_tree([
+            QueryPlanNode {
+                id: 137,
+                parent: Some(137),
+                ..QueryPlanNode::default()
+            },
+        ]);
+        let error = result.unwrap_err();
+
+        assert_eq!(error.node.id, 137);
+        assert_eq!(error.kind, QueryPlanBuildErrorKind::OrphanNodeOrCycle);
+    }
+
+    #[test]
+    fn cyclic_graph_indirect() {
+        let result = build_query_plan_tree([
+            QueryPlanNode {
+                id: 137,
+                parent: Some(42),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 99, // this one won't cause a cycle
+                parent: Some(137),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 42,
+                parent: Some(137),
+                ..QueryPlanNode::default()
+            },
+        ]);
+        let error = result.unwrap_err();
+
+         // we don't specify exactly which one should error
+        assert!(
+            [
+                (42, Some(137)),
+                (137, Some(42)),
+            ].contains(
+                &(error.node.id, error.node.parent)
+            )
+        );
+        assert_eq!(error.kind, QueryPlanBuildErrorKind::OrphanNodeOrCycle);
+    }
+
+    #[test]
+    fn orphan_node() {
+        let result = build_query_plan_tree([
+            QueryPlanNode {
+                id: 137,
+                parent: Some(0),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 99,
+                parent: Some(43), // this doesn't exist
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 42,
+                parent: Some(137),
+                ..QueryPlanNode::default()
+            },
+        ]);
+        let error = result.unwrap_err();
+
+        assert_eq!(error.kind, QueryPlanBuildErrorKind::OrphanNodeOrCycle);
+        assert_eq!(error.node.id, 99);
+    }
+
+    #[test]
+    fn more_than_one_root() {
+        let result = build_query_plan_tree([QueryPlanNode { id: 1, ..QueryPlanNode::root() }]);
+        let error = result.unwrap_err();
+
+        assert_eq!(error.kind, QueryPlanBuildErrorKind::MoreThanOneRoot);
+        assert_eq!(error.node.id, 1);
+    }
+
+    #[test]
+    fn duplicate_node_id() {
+        let error = build_query_plan_tree([QueryPlanNode::root()]).unwrap_err();
+        assert_eq!(error.kind, QueryPlanBuildErrorKind::DuplicateNodeId);
+        assert_eq!(error.node.id, 0);
+
+        let result = build_query_plan_tree([
+            QueryPlanNode {
+                id: 3,
+                parent: Some(0),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 4,
+                parent: Some(0),
+                ..QueryPlanNode::default()
+            },
+            QueryPlanNode {
+                id: 3,
+                parent: Some(4),
+                ..QueryPlanNode::default()
+            },
+        ]);
+        let error = result.unwrap_err();
+
+        assert_eq!(error.kind, QueryPlanBuildErrorKind::DuplicateNodeId);
+        assert_eq!(error.node.id, 3);
     }
 }
