@@ -86,6 +86,12 @@ pub struct ContainerAttributes {
     /// For `#[derive(Table)]`: the Foreign Key columns.
     #[deluxe(append, alias = fk)]
     pub foreign_key: Vec<TableForeignKey>,
+    /// For `#[derive(Table)]`: applies `UNIQUE` constraints on many columns.
+    #[deluxe(append)]
+    pub unique: Vec<SpannedValue<Vec<IdentOrStr>>>,
+    /// For `#[derive(Table)]`: applies additional `CHECK` constraints.
+    #[deluxe(append)]
+    pub check: Vec<String>,
 }
 
 /// Attributes on a struct field or an enum variant.

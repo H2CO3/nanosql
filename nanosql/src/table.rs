@@ -66,14 +66,16 @@ use ordered_float::NotNan;
 ///   specifies a compound `FOREIGN KEY` on the table. The specified tuple of columns must
 ///   **not** be empty. You can repeat this attribute with different combinations of columns
 ///   as many times as you want. The table and column names may be identifiers or strings.
-/// * `#[nanosql(unique = [column_1, column_N])]`: adds a potentially multi-column `UNIQUE`
-///   constraint (and the corresponding implicit index) to the table with the specified set
-///   of keys. The specified list of columns may **not** be empty.
+/// * `#[nanosql(unique = [column_1, column_N])]` or `#[nanosql(unique = ["column_1", "column_N"])]`:
+///   adds a potentially multi-column `UNIQUE` constraint (and the corresponding implicit index)
+///   to the table with the specified set of keys. The specified list of columns may **not** be
+///   empty. You can apply this attribute many times.
 /// * `#[nanosql(check = "SQL expression")]`: adds a table-level `CHECK` constraint,
-///   which has access to all columns of the table.
+///   which has access to all columns of the table. You can apply this attribute many times.
 /// * `#[nanosql(index(foo = asc, "bar" = desc))]`: adds an explicit index to
 ///   the specified tuple, with each column being sorted according to the given direction.
 ///   If the sorting direction is not specified, it defaults to `asc`ending.
+///   You can apply this attribute many times to create multiple indexes.
 ///
 /// Supported field-level attributes are:
 ///

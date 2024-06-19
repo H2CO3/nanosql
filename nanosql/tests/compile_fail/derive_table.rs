@@ -69,4 +69,40 @@ struct EmptyTupleFk {
     my_column: Option<String>,
 }
 
+/// An empty tuple is not allowed in a UNIQUE constraint.
+#[derive(Clone, Default, Debug, Param, Table)]
+#[nanosql(unique = [])]
+//~^ ERROR unique constraint must refer to at least 1 column
+struct EmptyTupleUnique {
+    qux: Option<i32>,
+    lol: String,
+}
+
+/// Columns of a unique constraint must exist in this table.
+#[derive(Clone, Default, Debug, Param, Table)]
+#[nanosql(unique = [bar, wut, foo])]
+//~^ ERROR unknown column `wut` in unique constraint
+struct NonExistentUnique {
+    foo: bool,
+    bar: Box<[u8]>,
+}
+
+/// A table-level unique constraint must not have duplicate columns.
+#[derive(Clone, Default, Debug, Param, Table)]
+#[nanosql(unique = ["my_little_column", my_little_column])]
+//~^ ERROR duplicate columns in unique constraint
+struct DuplicateUnique {
+    #[nanosql(rename = my_little_column)]
+    only_one_col: u64,
+}
+
+/// A table-level unique constraint must respect `rename` and `rename_all`.
+#[derive(Clone, Default, Debug, Param, Table)]
+#[nanosql(unique = ["not_renamed"])]
+//~^ ERROR unknown column `not_renamed` in unique constraint
+struct RenamedUnique {
+    #[nanosql(rename = another_name)]
+    not_renamed: Option<bool>,
+}
+
 fn main() {}

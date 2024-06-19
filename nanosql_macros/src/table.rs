@@ -76,6 +76,7 @@ fn expand_struct(
 
     validate_primary_key(attrs.primary_key.as_ref(), &attrs_for_each_field, &col_name_str)?;
     validate_foreign_keys(&attrs.foreign_key, &attrs_for_each_field, &col_name_str)?;
+    validate_unique_constraints(&attrs.unique, &attrs_for_each_field, &col_name_str)?;
 
     let col_ty = fields.named
         .iter()
@@ -162,6 +163,14 @@ fn expand_struct(
             }
         });
 
+    let table_unique_constraints = attrs.unique
+        .iter()
+        .map(|val| val.iter())
+        .map(|cols| quote!(.unique([#(#cols,)*])));
+    let table_check_constraints = attrs.check
+        .iter()
+        .map(|expr| quote!(.check(#expr)));
+
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
     Ok(quote!{
@@ -190,6 +199,8 @@ fn expand_struct(
                 )*
                 #table_primary_key
                 #(#table_foreign_keys)*
+                #(#table_unique_constraints)*
+                #(#table_check_constraints)*
             }
         }
     })
@@ -307,6 +318,50 @@ fn validate_one_foreign_key(
 
     // Unlike a PRIMARY KEY, there may be more than one FOREIGN KEY on a table,
     // so we don't need to check for that kind of (non-)conflict. Yay! \o/
+
+    Ok(())
+}
+
+fn validate_unique_constraints(
+    unique_cols: &[SpannedValue<Vec<IdentOrStr>>],
+    field_attrs: &[FieldAttributes],
+    all_cols: &[String],
+) -> Result<(), Error> {
+    unique_cols
+        .iter()
+        .try_for_each(|cols| validate_one_unique_constraint(cols, field_attrs, all_cols))
+}
+
+fn validate_one_unique_constraint(
+    unique_cols: &SpannedValue<Vec<IdentOrStr>>,
+    field_attrs: &[FieldAttributes],
+    all_cols: &[String],
+) -> Result<(), Error> {
+    assert_eq!(field_attrs.len(), all_cols.len());
+
+    // ensure that the foreign key spec contains at least 1 column
+    if unique_cols.is_empty() {
+        return Err(Error::new_spanned(
+            unique_cols,
+            "unique constraint must refer to at least 1 column"
+        ));
+    }
+
+    // ensure that the referenced columns do in fact exist
+    if let Some(err_col) = unique_cols.iter().find(|col| !all_cols.contains(&col.to_string())) {
+        return Err(Error::new_spanned(
+            err_col,
+            format_args!("unknown column `{err_col}` in unique constraint")
+        ));
+    }
+
+    // ensure that the referenced columns are unique
+    let mut column_set = HashSet::new();
+    for col in unique_cols.as_slice() {
+        if !column_set.insert(col) {
+            return Err(Error::new_spanned(col, "duplicate columns in unique constraint"));
+        }
+    }
 
     Ok(())
 }
