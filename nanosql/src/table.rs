@@ -239,7 +239,7 @@ impl TableDesc {
     ///
     /// This includes explicit indexes added manually, and implicit
     /// indexes (e.g., those created for `FOREIGN KEY` clauses).
-    pub fn index_specs(&self) -> impl Iterator<Item = Vec<ColumnIndexSpec>> + '_ {
+    pub fn index_specs(&self) -> impl Iterator<Item = TableIndexSpec> + '_ {
         // start with table-level explicit indexes
         self.indexes
             .iter()
@@ -263,6 +263,12 @@ impl TableDesc {
                 // then, append column-level explicit and implicit indexes as well
                 column.index_spec().map(|index_spec| vec![index_spec])
             }))
+            .enumerate()
+            .map(|(i, columns)| TableIndexSpec {
+                table: self.name.clone(),
+                id: i + 1,
+                columns,
+            })
     }
 }
 
@@ -570,6 +576,15 @@ pub enum SortOrder {
     Descending,
 }
 
+impl Display for SortOrder {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match *self {
+            SortOrder::Ascending => "ASC",
+            SortOrder::Descending => "DESC",
+        })
+    }
+}
+
 /// The properties of an index, corresponding to a single column.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ColumnIndexSpec {
@@ -577,6 +592,43 @@ pub struct ColumnIndexSpec {
     pub name: String,
     /// The order in which the values are sorted in the index.
     pub sort_order: SortOrder,
+}
+
+impl Display for ColumnIndexSpec {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let ColumnIndexSpec { name, sort_order } = self;
+        write!(formatter, r#""{name}" {sort_order}"#)
+    }
+}
+
+/// The properties of a potentially multi-column index on a table.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct TableIndexSpec {
+    /// The name of the table that this index is indexing.
+    pub table: String,
+    /// The id of the index. Must be unique within the table that the index belongs to.
+    pub id: usize,
+    /// The columns included in this index, from leftmost to rightmost.
+    pub columns: Vec<ColumnIndexSpec>,
+}
+
+impl Display for TableIndexSpec {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let TableIndexSpec { table, id, columns } = self;
+        let mut sep = "";
+
+        write!(
+            formatter,
+            r#"CREATE INDEX IF NOT EXISTS "__nanosql_index_{table}_{id}" ON "{table}"("#,
+        )?;
+
+        for col in columns {
+            write!(formatter, "{sep}\n    {col}")?;
+            sep = ",";
+        }
+
+        formatter.write_str("\n);")
+    }
 }
 
 /// A top-level constraint applied to an entire table at once.

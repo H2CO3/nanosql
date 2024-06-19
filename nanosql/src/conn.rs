@@ -1,7 +1,6 @@
 //! Working with top-level SQLite connections.
 
 use core::borrow::Borrow;
-use core::fmt::Write;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use crate::{
     query::Query,
@@ -93,25 +92,11 @@ impl ConnectionExt for Connection {
         // First, create the table itself.
         self.compile_invoke(CreateTable::<T>::default(), ())?;
 
-        let desc = T::description();
-
         // Then, create indexes: table-level and field-level, explicit and implicit
-        for (i, index_cols) in desc.index_specs().enumerate() {
-            let mut sql = format!(
-                r#"CREATE INDEX IF NOT EXISTS "__nanosql_index_{table}_{id}" ON "{table}"("#,
-                table = desc.name,
-                id = i + 1,
-            );
-            let mut sep = "";
-
-            for col in index_cols {
-                write!(sql, "{sep}\n    \"{col}\"", col = col.name)?;
-                sep = ",";
-            }
-
-            sql.push_str("\n);");
-
-            self.prepare(&sql)?.execute([])?;
+        for table_index in T::description().index_specs() {
+            let sql = table_index.to_string();
+            let mut stmt = self.prepare(&sql)?;
+            stmt.execute([])?;
         }
 
         Ok(())

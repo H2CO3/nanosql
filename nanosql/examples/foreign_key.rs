@@ -108,7 +108,7 @@ fn do_it() -> Result<()> {
         assert!(sql.contains("CREATE INDEX \"__nanosql_index_Employee_"));
         assert!(
             (
-                sql.contains("boss_employee_id")
+                sql.contains(r#""boss_employee_id" ASC"#)
                 &&
                 !sql.contains("employing_department_id")
                 &&
@@ -116,7 +116,7 @@ fn do_it() -> Result<()> {
                 &&
                 !sql.contains("some_fk_2")
             ) || (
-                sql.contains("employing_department_id")
+                sql.contains(r#""employing_department_id" ASC"#)
                 &&
                 !sql.contains("boss_employee_id")
                 &&
@@ -124,9 +124,9 @@ fn do_it() -> Result<()> {
                 &&
                 !sql.contains("some_fk_2")
             ) || (
-                sql.contains("some_fk_1")
+                sql.contains(r#""some_fk_1" ASC"#)
                 &&
-                sql.contains("some_fk_2")
+                sql.contains(r#""some_fk_2" ASC"#)
                 &&
                 !sql.contains("boss_employee_id")
                 &&
