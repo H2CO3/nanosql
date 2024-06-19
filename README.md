@@ -195,6 +195,9 @@ fn main() -> Result<()> {
 }
 ```
 
+See the [`nanosql/examples`](https://github.com/H2CO3/nanosql/tree/master/nanosql/examples)
+directory for more advanced and interesting examples.
+
 ## A note about batch insertion and transactions
 
 The [`ConnectionExt::insert_batch()`] method wraps the insertion statements in a transaction

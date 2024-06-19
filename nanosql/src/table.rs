@@ -35,10 +35,16 @@ use ordered_float::NotNan;
 ///
 /// Supported `struct`-level attributes are:
 ///
+/// * `#[nanosql(insert_input_ty = my::awesome::InsertType)]` changes the insert
+///   parameter type of the table (i.e., the [`Table::InsertInput`] associated type)
+///   from `Self` (the default) to whatever you specify.
+/// * `#[nanosql(insert_input_lt = 'foo)]` changes the default `'p` lifetime parameter
+///   of the insert input type to the specified lifetime.
 /// * `#[nanosql(rename = "TableName")]` changes the name of the table to the given
-///   string, instead of using the name of the `struct` itself.
+///   string, instead of using the name of the `struct` itself. The name may be either
+///   a plain identifier (Rust keywords included), or a string literal.
 /// * `#[nanosql(rename_all = "casing")]` renames all fields based on the
-///   specified case-transforming convention. Valid casing conventions are:
+///   specified case-transforming convention. Valid `casing` conventions are:
 ///
 ///   * `lower_snake_case`
 ///   * `UPPER_SNAKE_CASE`
@@ -49,10 +55,31 @@ use ordered_float::NotNan;
 ///   * `Title Case`
 ///   * `Train-Case`
 ///
+/// * `#[nanosql(primary_key = ["column_1", "column_N"])]` or
+///   `#[nanosql(pk = [column_1, column_N])]`: specifies that these columns form the
+///   (compound) `PRIMARY KEY` of this table. You may not specify a field-level primary
+///   key if you use this attribute. This attribute respects the `rename` and `rename_all`
+///   attributes. The column names may be specified either as bare Rust identifiers or
+///   as string literals (if needed). The tuple of columns may **not** be empty.
+/// * `#[nanosql(foreign_key("TableName" => (my_col_1 = other_col_1, my_col_N = other_col_n)))]` or
+///   `#[nanosql(fk(TableName => ("my_col_1" => "other_col_1", "my_col_N" => "other_col_N")))]`:
+///   specifies a compound `FOREIGN KEY` on the table. The specified tuple of columns must
+///   **not** be empty. You can repeat this attribute with different combinations of columns
+///   as many times as you want. The table and column names may be identifiers or strings.
+/// * `#[nanosql(unique = [column_1, column_N])]`: adds a potentially multi-column `UNIQUE`
+///   constraint (and the corresponding implicit index) to the table with the specified set
+///   of keys. The specified list of columns may **not** be empty.
+/// * `#[nanosql(check = "SQL expression")]`: adds a table-level `CHECK` constraint,
+///   which has access to all columns of the table.
+/// * `#[nanosql(index(foo = asc, "bar" = desc))]`: adds an explicit index to
+///   the specified tuple, with each column being sorted according to the given direction.
+///   If the sorting direction is not specified, it defaults to `asc`ending.
+///
 /// Supported field-level attributes are:
 ///
 /// * `#[nanosql(rename = "column_name")]`: changes the name of the column
-///   to the specified string, instead of using the name of the field.
+///   to the specified string, instead of using the name of the field. The
+///   name may be specified with either an identifier or a string literal.
 /// * `#[nanosql(sql_ty = path::to::AsSqlTy)]`: forwards the `AsSqlTy` impl
 ///   to the specified type, instead of using the field's own declared type.
 /// * `#[nanosql(unique)]`: imposes an SQL `UNIQUE` constraint on the field.
@@ -61,6 +88,21 @@ use ordered_float::NotNan;
 /// * `#[nanosql(default = "expression")]`: apply a default value (literal
 ///   or full-blown SQL expression) upon an `INSERT` statements, when the
 ///   value for the column is omitted.
+/// * `#[nanosql(generated(virtual = "expression"))]` or
+///   `#[nanosql(generated(stored = "expression"))]`: declares the column
+///   as `GENERATED ALWAYS [VIRTUAL | STORED]`.
+/// * `#[nanosql(primary_key)]` or `#[nanosql(pk)]`: defines the column as
+///   the `PRIMARY KEY` of the table. This may only be used on a single column
+///   within any given table. This attribute may not be used together with the
+///   table-level `primary_key` attribute!
+/// * `#[nanosql(foreign_key = OtherTable::some_column)]` or
+///   `#[nanosql(fk("OtherTable" => "some_column"))]`: defines a foreign key
+///   relationship between this column and another column of a different table.
+///   (The table on the other side may also be this table, for representing a
+///   hierarchy.) You can specify multiple foreign key columns.
+/// * `#[nanosql(index = desc)]`: adds an explicit index on this column
+///   with the specified ordering direction. If the direction is omitted, it
+///   defaults to `asc`ending.
 pub trait Table {
     /// The parameter set used for performing `INSERT` queries.
     /// This is often just `Self`, but it may be a differen type,
