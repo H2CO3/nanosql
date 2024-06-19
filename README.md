@@ -27,6 +27,7 @@ and can be called for convenience.
 The absolute basics - create a table, insert a bunch of records into it, then retrieve them:
 
 ```rust
+use std::fmt::{self, Formatter};
 use nanosql::{
     Result, Connection, ConnectionExt, Query,
     ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table
@@ -97,8 +98,8 @@ impl Query for PetById {
     type Output = Option<Pet>;
 
     /// Finally, we create the actual SQL query.
-    fn sql(&self) -> Result<impl AsRef<str> + '_> {
-        Ok("SELECT id, nickName, type FROM MyLittlePet WHERE id = ?")
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SELECT id, nickName, type FROM MyLittlePet WHERE id = ?")
     }
 }
 

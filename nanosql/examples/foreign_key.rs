@@ -59,9 +59,10 @@ nanosql::define_query!{
 
 fn do_it() -> Result<()> {
     let query = CreateTable::<Employee>::default();
-    let sql = query.sql()?.as_ref().to_string();
+    let sql_disp = query.display_sql();
+    let sql = sql_disp.to_string();
 
-    println!("{sql}");
+    println!("{sql_disp}");
 
     assert!(
         sql.contains(

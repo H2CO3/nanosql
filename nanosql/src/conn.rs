@@ -82,8 +82,8 @@ pub trait ConnectionExt: Sealed {
 
 impl ConnectionExt for Connection {
     fn compile<Q: Query>(&self, query: Q) -> Result<CompiledStatement<'_, Q>> {
-        let sql = query.sql()?;
-        let statement = self.prepare_cached(sql.as_ref())?;
+        let sql = query.display_sql().to_string();
+        let statement = self.prepare_cached(&sql)?;
 
         Ok(CompiledStatement::new(statement))
     }
@@ -93,13 +93,9 @@ impl ConnectionExt for Connection {
         self.compile_invoke(CreateTable::<T>::default(), ())?;
 
         // Then, create indexes: table-level and field-level, explicit and implicit
-        for table_index in T::description().index_specs() {
-            let sql = table_index.to_string();
-            let mut stmt = self.prepare(&sql)?;
-            stmt.execute([])?;
-        }
-
-        Ok(())
+        T::description()
+            .index_specs()
+            .try_for_each(|spec| self.compile_invoke(spec, ()))
     }
 
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>

@@ -1,5 +1,6 @@
 //! Meta-queries for high-level query plan and low-level bytecode program debugging
 
+use std::fmt::{self, Formatter};
 use std::collections::{BTreeMap, HashSet};
 use thiserror::Error;
 use rusqlite::{Row, Rows, types::Value};
@@ -9,7 +10,6 @@ use crate::row::{ResultRecord, ResultSet};
 
 #[cfg(feature = "pretty-eqp")]
 use {
-    std::fmt,
     std::io,
     std::borrow::Cow,
     ptree::{TreeItem, Style}
@@ -82,8 +82,9 @@ impl<Q: Query> Query for ExplainVdbeProgram<Q> {
     /// regardless of the input type of the underlying query.
     type Output = Vec<VdbeInstruction>;
 
-    fn sql(&self) -> Result<impl AsRef<str>> {
-        self.query.sql().map(|sql| format!("EXPLAIN {}", sql.as_ref()))
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("EXPLAIN ")?;
+        self.query.format_sql(formatter)
     }
 }
 
@@ -201,9 +202,9 @@ impl<Q: Query> Query for ExplainQueryPlan<Q> {
     /// regardless of the input type of the underlying query.
     type Output = QueryPlan;
 
-    fn sql(&self) -> Result<impl AsRef<str>> {
-        let subquery = self.query.sql()?;
-        Ok(format!("EXPLAIN QUERY PLAN {}", subquery.as_ref()))
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("EXPLAIN QUERY PLAN ")?;
+        self.query.format_sql(formatter)
     }
 }
 

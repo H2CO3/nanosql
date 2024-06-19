@@ -1,8 +1,8 @@
 //! Strongly-typed queries.
 
+use core::fmt::{self, Display, Formatter};
 use crate::param::Param;
 use crate::row::ResultSet;
-use crate::error::Result;
 
 
 /// Describes the input (parameter) and output (relation/row/tuple)
@@ -31,7 +31,12 @@ pub trait Query {
     type Output: ResultSet;
 
     /// Provides the SQL source text of the query.
-    fn sql(&self) -> Result<impl AsRef<str> + '_>;
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result;
+
+    /// Returns a formatter object that displays the SQL text for this query.
+    fn display_sql(&self) -> SqlDisplay<&Self> {
+        SqlDisplay::new(self)
+    }
 }
 
 impl<Q> Query for &Q
@@ -41,8 +46,8 @@ where
     type Input<'p> = Q::Input<'p>;
     type Output = Q::Output;
 
-    fn sql(&self) -> Result<impl AsRef<str> + '_> {
-        Q::sql(&**self)
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        Q::format_sql(&**self, formatter)
     }
 }
 
@@ -53,8 +58,8 @@ where
     type Input<'p> = Q::Input<'p>;
     type Output = Q::Output;
 
-    fn sql(&self) -> Result<impl AsRef<str> + '_> {
-        Q::sql(&**self)
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        Q::format_sql(&**self, formatter)
     }
 }
 
@@ -65,8 +70,33 @@ where
     type Input<'p> = Q::Input<'p>;
     type Output = Q::Output;
 
-    fn sql(&self) -> Result<impl AsRef<str> + '_> {
-        Q::sql(&**self)
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        Q::format_sql(&**self, formatter)
+    }
+}
+
+/// Formats the SQL source of a query (an adapter between `Query` and `Display`)
+#[derive(Clone, Copy, Debug)]
+pub struct SqlDisplay<Q: ?Sized> {
+    /// The query of which the SQL text is to be displayed.
+    pub query: Q,
+}
+
+impl<Q> SqlDisplay<Q> {
+    /// Creates a new `SqlDisplay`, wrapping a specific query instance.
+    pub const fn new(query: Q) -> Self {
+        SqlDisplay { query }
+    }
+
+    /// Returns ownership of the wrapped query back to the caller.
+    pub fn into_inner(self) -> Q {
+        self.query
+    }
+}
+
+impl<Q: Query + ?Sized> Display for SqlDisplay<Q> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        self.query.format_sql(formatter)
     }
 }
 
@@ -75,7 +105,7 @@ where
 ///
 /// ```ignore
 /// define_query!{
-///     QueryName<'lt>: InputType<'lt> => OutputType { "SQL (impl AsRef<str>)" }
+///     QueryName<'lt>: InputType<'lt> => OutputType { "SQL (impl Display)" }
 /// }
 /// ```
 ///
@@ -186,8 +216,8 @@ macro_rules! define_query {
             type Input<$lt> = $input_ty;
             type Output = $output_ty;
 
-            fn sql(&self) -> $crate::Result<impl ::core::convert::AsRef<::core::primitive::str> + '_> {
-                $crate::Result::Ok($sql)
+            fn format_sql(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                ::core::fmt::Display::fmt(&$sql, formatter)
             }
         }
     )*}

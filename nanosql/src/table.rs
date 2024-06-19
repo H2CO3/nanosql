@@ -21,7 +21,6 @@ use std::sync::Arc;
 use crate::{
     query::Query,
     param::{Param, ParamPrefix},
-    error::Result,
 };
 #[cfg(feature = "not-nan")]
 use ordered_float::NotNan;
@@ -612,8 +611,11 @@ pub struct TableIndexSpec {
     pub columns: Vec<ColumnIndexSpec>,
 }
 
-impl Display for TableIndexSpec {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+impl Query for TableIndexSpec {
+    type Input<'p> = ();
+    type Output = ();
+
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         let TableIndexSpec { table, id, columns } = self;
         let mut sep = "";
 
@@ -950,23 +952,22 @@ impl<T: Table> Query for CreateTable<T> {
     type Input<'p> = ();
     type Output = ();
 
-    fn sql(&self) -> Result<impl AsRef<str> + '_> {
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         let desc = T::description();
-        let mut sql = format!(r#"CREATE TABLE IF NOT EXISTS "{}"("#, desc.name);
         let mut sep = "";
 
+        write!(formatter, r#"CREATE TABLE IF NOT EXISTS "{}"("#, desc.name)?;
+
         for column in &desc.columns {
-            write!(sql, "{sep}\n    {column}")?;
+            write!(formatter, "{sep}\n    {column}")?;
             sep = ", ";
         }
 
         for constraint in &desc.constraints {
-            write!(sql, "{sep}\n    {constraint}")?;
+            write!(formatter, "{sep}\n    {constraint}")?;
         }
 
-        sql.push_str("\n);");
-
-        Ok(sql)
+        formatter.write_str("\n);")
     }
 }
 
@@ -998,17 +999,18 @@ impl<T: Table> Query for Insert<T> {
     type Output = ();
 
     /// TODO(H2CO3): respect optional/defaulted columns
-    fn sql(&self) -> Result<impl AsRef<str> + '_> {
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         let desc = T::description();
-        let mut sql = format!(r#"INSERT INTO "{}"("#, desc.name);
         let mut sep = "";
 
+        write!(formatter, r#"INSERT INTO "{}"("#, desc.name)?;
+
         for col in desc.columns_for_insert() {
-            write!(sql, "{sep}\n    \"{col}\"", col = col.name)?;
+            write!(formatter, "{sep}\n    \"{col}\"", col = col.name)?;
             sep = ", ";
         }
 
-        sql.push_str("\n)\nVALUES(");
+        formatter.write_str("\n)\nVALUES(")?;
         sep = "";
 
         for (idx, col) in (1_usize..).zip(desc.columns_for_insert()) {
@@ -1018,13 +1020,11 @@ impl<T: Table> Query for Insert<T> {
                 ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => &col.name
             };
 
-            write!(sql, "{sep}\n    {pfx}{param_name}", pfx = Self::Input::PREFIX)?;
+            write!(formatter, "{sep}\n    {pfx}{param_name}", pfx = Self::Input::PREFIX)?;
 
             sep = ", ";
         }
 
-        sql.push_str("\n);");
-
-        Ok(sql)
+        formatter.write_str("\n);")
     }
 }
