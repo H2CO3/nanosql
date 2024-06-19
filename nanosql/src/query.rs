@@ -182,12 +182,12 @@ macro_rules! define_query {
         $(#[$($attrs)*])*
         $vis struct $tyname;
 
-        impl ::nanosql::Query for $tyname {
+        impl $crate::Query for $tyname {
             type Input<$lt> = $input_ty;
             type Output = $output_ty;
 
-            fn sql(&self) -> ::nanosql::Result<impl ::core::convert::AsRef<::core::primitive::str> + '_> {
-                ::nanosql::Result::Ok($sql)
+            fn sql(&self) -> $crate::Result<impl ::core::convert::AsRef<::core::primitive::str> + '_> {
+                $crate::Result::Ok($sql)
             }
         }
     )*}

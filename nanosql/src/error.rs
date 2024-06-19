@@ -2,6 +2,7 @@
 
 use core::str::Utf8Error;
 use core::fmt::{self, Display, Formatter};
+use std::io;
 use std::error::Error as StdError;
 use std::borrow::Cow;
 use rusqlite::{Error as SqlError, types::FromSqlError};
@@ -19,6 +20,9 @@ pub enum Error {
 
     #[error("formatting error")]
     Fmt(#[from] fmt::Error),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] io::Error),
 
     #[error("SQLite error: {0}")]
     Sqlite(#[from] SqlError),

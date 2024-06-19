@@ -6,7 +6,7 @@ use crate::{
     query::Query,
     table::{Table, InsertInput, CreateTable, Insert},
     stmt::CompiledStatement,
-    explain::{ExplainVdbeProgram, VdbeInstruction, ExplainQueryPlan, QueryPlanNode},
+    explain::{ExplainVdbeProgram, VdbeInstruction, ExplainQueryPlan, QueryPlan},
     error::{Error, Result},
     util::Sealed,
 };
@@ -75,7 +75,7 @@ pub trait ConnectionExt: Sealed {
     }
 
     /// Explains the high-level query plan generated for a query/statement.
-    fn explain_query_plan<Q: Query>(&self, query: Q) -> Result<Vec<QueryPlanNode>> {
+    fn explain_query_plan<Q: Query>(&self, query: Q) -> Result<QueryPlan> {
         self.compile_invoke(ExplainQueryPlan::from(query), ())
     }
 }
