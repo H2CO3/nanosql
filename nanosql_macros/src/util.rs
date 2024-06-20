@@ -107,8 +107,9 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: marks the field as the PRIMARY KEY.
     #[deluxe(alias = pk, default = SpannedValue::new(false))]
     pub primary_key: SpannedValue<bool>,
+    /// For `#[derive(Table)]`: marks the field as a FOREIGN KEY.
     #[deluxe(alias = fk)]
-    pub foreign_key: Option<FieldForeignKey>,
+    pub foreign_key: Option<ColumnForeignKey>,
     /// For `#[derive(Table)]`: declares that the field must be unique.
     #[deluxe(default = false)]
     pub unique: bool,
@@ -124,12 +125,12 @@ pub struct FieldAttributes {
 }
 
 #[derive(Clone, Debug)]
-pub struct FieldForeignKey {
+pub struct ColumnForeignKey {
     pub table: IdentOrStr,
     pub column: IdentOrStr,
 }
 
-impl ParseMetaItem for FieldForeignKey {
+impl ParseMetaItem for ColumnForeignKey {
     fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
         let table: IdentOrStr = input.parse()?;
 
@@ -144,7 +145,7 @@ impl ParseMetaItem for FieldForeignKey {
 
         let column: IdentOrStr = input.parse()?;
 
-        Ok(FieldForeignKey { table, column })
+        Ok(ColumnForeignKey { table, column })
     }
 }
 
