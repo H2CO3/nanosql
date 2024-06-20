@@ -66,7 +66,7 @@ fn do_it() -> Result<()> {
     assert!(err_msg.contains("CHECK constraint"));
     assert!(err_msg.contains("building_no"));
 
-    // this should violate the CHECK constraint on the `building_no` column
+    // this should violate the CHECK constraint on the `floor` column
     let result = conn.insert_batch([
         Address {
             country: "Poland".into(),
