@@ -151,24 +151,14 @@ fn expand_struct(
             })
         });
 
-    let table_indexes = &attrs.index;
     let table_primary_key = attrs.primary_key.as_ref().map(|pk| {
         let columns = pk.iter();
         quote!{
             .primary_key([#(#columns,)*])
         }
     });
-    let table_foreign_keys = attrs.foreign_key
-        .iter()
-        .map(|fk_spec| {
-            let table_name = &fk_spec.table;
-            let own_cols = fk_spec.columns.iter().map(|pair| &pair.0);
-            let other_cols = fk_spec.columns.iter().map(|pair| &pair.1);
-
-            quote!{
-                .foreign_key(#table_name, [#((#own_cols, #other_cols),)*])
-            }
-        });
+    let table_foreign_keys = &attrs.foreign_key;
+    let table_indexes = &attrs.index;
 
     let table_unique_constraints = attrs.unique
         .iter()

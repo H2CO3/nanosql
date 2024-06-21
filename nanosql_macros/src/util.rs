@@ -375,6 +375,18 @@ pub struct TableForeignKey {
     pub columns: Punctuated<(IdentOrStr, IdentOrStr), Token![,]>,
 }
 
+impl ToTokens for TableForeignKey {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let table_name = &self.table;
+        let own_cols = self.columns.iter().map(|pair| &pair.0);
+        let other_cols = self.columns.iter().map(|pair| &pair.1);
+
+        tokens.extend(quote!{
+            .foreign_key(#table_name, [#((#own_cols, #other_cols),)*])
+        });
+    }
+}
+
 impl ParseMetaItem for TableForeignKey {
     fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
         let table: IdentOrStr = input.parse()?;
