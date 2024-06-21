@@ -291,13 +291,13 @@ impl TableDesc {
     pub fn index_specs(&self) -> Vec<TableIndexSpec> {
         // start with table-level explicit indexes
         let mut indexes = self.indexes.clone();
-        let mut next_id = indexes.iter().map(|index| index.id).max().unwrap_or(0) + 1;
 
         // then, append table-level implicit indexes (resulting from FKs etc.)
         for constraint in &self.constraints {
             let TableConstraint::ForeignKey { column_pairs, .. } = constraint else {
                 continue;
             };
+            let id = indexes.len() + 1;
             let columns = column_pairs
                 .iter()
                 .map(|(own_name, _)| (own_name.clone(), SortOrder::Ascending))
@@ -305,22 +305,20 @@ impl TableDesc {
 
             indexes.push(TableIndexSpec {
                 table: self.name.clone(),
-                id: next_id,
+                id,
                 columns,
                 unique: false,
                 predicate: None,
             });
-
-            next_id += 1;
         }
 
         // then, append column-level explicit and implicit indexes as well
         for column in &self.columns {
             let Some(col_spec) = column.index_spec() else { continue };
-            let spec = TableIndexSpec::single_column(self.name.clone(), next_id, col_spec);
+            let id = indexes.len() + 1;
+            let spec = TableIndexSpec::single_column(self.name.clone(), id, col_spec);
 
             indexes.push(spec);
-            next_id += 1;
         }
 
         indexes
