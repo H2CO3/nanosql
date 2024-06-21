@@ -34,7 +34,17 @@ pub trait ConnectionExt: Sealed {
     /// Creates the table represented by `T` if it does not yet exist.
     ///
     /// Also creates any necessary indexes (e.g. for foreign keys).
-    fn create_table<T: Table>(&self) -> Result<()>;
+    fn create_table<T: Table>(&self) -> Result<()> {
+        // First, create the table itself.
+        self.compile_invoke(CreateTable::<T>::default(), ())?;
+
+        // Then, create indexes: table-level and field-level, explicit and implicit
+        T::description()
+            .index_specs()
+            .iter()
+            .try_for_each(|spec| self.compile_invoke(spec, ()))
+    }
+
 
     /// Convenience method for inserting many rows into a table in one go.
     /// It prepares an `INSERT` statement and calls it in a loop, so it's
@@ -85,18 +95,7 @@ impl ConnectionExt for Connection {
         let sql = query.display_sql().to_string();
         let statement = self.prepare_cached(&sql)?;
 
-        Ok(CompiledStatement::new(statement))
-    }
-
-    fn create_table<T: Table>(&self) -> Result<()> {
-        // First, create the table itself.
-        self.compile_invoke(CreateTable::<T>::default(), ())?;
-
-        // Then, create indexes: table-level and field-level, explicit and implicit
-        T::description()
-            .index_specs()
-            .iter()
-            .try_for_each(|spec| self.compile_invoke(spec, ()))
+        Ok(CompiledStatement::new(statement, sql))
     }
 
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>

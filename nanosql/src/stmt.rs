@@ -13,14 +13,16 @@ use crate::error::Result;
 /// A compiled/"prepared" statement.
 pub struct CompiledStatement<'conn, Q> {
     statement: CachedStatement<'conn>,
+    sql: String,
     marker: PhantomData<fn() -> Q>,
 }
 
 impl<'conn, Q: Query> CompiledStatement<'conn, Q> {
     /// Constructs a `CompiledStatement` from an untyped SQLite prepared statement.
-    pub(crate) fn new(statement: CachedStatement<'conn>) -> Self {
+    pub(crate) fn new(statement: CachedStatement<'conn>, sql: String) -> Self {
         CompiledStatement {
             statement,
+            sql,
             marker: PhantomData,
         }
     }
@@ -56,6 +58,11 @@ impl<'conn, Q: Query> CompiledStatement<'conn, Q> {
 
         Ok(result)
     }
+
+    /// Returns the SQL source underlying this compiled statement.
+    pub fn sql(&self) -> &str {
+        self.sql.as_str()
+    }
 }
 
 impl<Q> Debug for CompiledStatement<'_, Q> {
@@ -70,17 +77,13 @@ impl<Q> Debug for CompiledStatement<'_, Q> {
             })
             .collect();
 
-        let sql = if formatter.alternate() {
-            self.statement.expanded_sql().map_or(Cow::Borrowed("<unavailable>"), Cow::Owned)
-        } else {
-            Cow::Borrowed("...")
-        };
+        let sql = if formatter.alternate() { self.sql.as_str() } else { "..." };
 
         formatter
             .debug_struct("CompiledStatement")
             .field("columns", &self.statement.column_names())
             .field("params", &param_names)
-            .field("sql", &sql)
+            .field("sql", &format_args!("{sql}")) // the SQL shouldn't be escaped
             .finish()
     }
 }
