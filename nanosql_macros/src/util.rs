@@ -3,12 +3,12 @@ use std::hash::{Hash, Hasher};
 use std::collections::HashSet;
 use proc_macro::TokenStream as TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
-use syn::{Token, Fields, WhereClause, WherePredicate, TypeParamBound, Lit, LitStr, Type, Lifetime};
-use syn::parse_quote;
+use syn::{Token, Fields, WhereClause, WherePredicate, TypeParamBound, Type, Lifetime};
+use syn::{parse_quote, Lit, LitBool, LitStr};
 use syn::parse::{Parse, ParseStream, Error};
 use syn::punctuated::Punctuated;
 use syn::ext::IdentExt;
-use quote::ToTokens;
+use quote::{quote, quote_spanned, ToTokens};
 use deluxe::{ParseAttributes, ParseMetaItem, ParseMode, SpannedValue};
 
 
@@ -86,6 +86,9 @@ pub struct ContainerAttributes {
     /// For `#[derive(Table)]`: the Foreign Key columns.
     #[deluxe(append, alias = fk)]
     pub foreign_key: Vec<TableForeignKey>,
+    /// For `#[derive(Table)]`: add an explicit index.
+    #[deluxe(append)]
+    pub index: Vec<TableIndexSpec>,
     /// For `#[derive(Table)]`: applies `UNIQUE` constraints on many columns.
     #[deluxe(append)]
     pub unique: Vec<SpannedValue<Vec<IdentOrStr>>>,
@@ -110,6 +113,8 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: marks the field as a FOREIGN KEY.
     #[deluxe(alias = fk)]
     pub foreign_key: Option<ColumnForeignKey>,
+    /// For `#[derive(Table)]`: adds an index to this column.
+    pub index: Option<ColumnIndexSpec>,
     /// For `#[derive(Table)]`: declares that the field must be unique.
     #[deluxe(default = false)]
     pub unique: bool,
@@ -146,6 +151,221 @@ impl ParseMetaItem for ColumnForeignKey {
         let column: IdentOrStr = input.parse()?;
 
         Ok(ColumnForeignKey { table, column })
+    }
+}
+
+/// Miraculously, the `Default` impl does exactly the right thing.
+#[derive(Clone, Default, Debug)]
+pub struct ColumnIndexSpec {
+    pub unique: bool,
+    pub sort_order: SortOrder,
+    pub predicate: Option<String>,
+}
+
+impl ToTokens for ColumnIndexSpec {
+    fn to_tokens(&self, ts: &mut TokenStream2) {
+        let &ColumnIndexSpec { unique, sort_order, ref predicate } = self;
+        let predicate_tokens = match predicate {
+            None => quote!(::core::option::Option::<&'static ::core::primitive::str>::None),
+            Some(expr) => quote!(::core::option::Option::Some(#expr)),
+        };
+
+        ts.extend(quote!{
+            .set_index(
+                #unique,
+                #sort_order,
+                #predicate_tokens,
+            )
+        })
+    }
+}
+
+impl ParseMetaItem for ColumnIndexSpec {
+    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+        mod kw {
+            syn::custom_keyword!(unique);
+            syn::custom_keyword!(predicate);
+            syn::custom_keyword!(asc);
+            syn::custom_keyword!(desc);
+        }
+
+        let mut unique = false;
+        let mut sort_order = SortOrder::default();
+        let mut predicate = None;
+
+        if input.peek(kw::unique) {
+            let _: kw::unique = input.parse()?;
+
+            if input.peek(Token![=]) {
+                let _: Token![=] = input.parse()?;
+                let bool_lit: LitBool = input.parse()?;
+                unique = bool_lit.value();
+            } else {
+                unique = true;
+            }
+
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+
+        if input.peek(kw::asc) {
+            let _: kw::asc = input.parse()?;
+
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+
+            sort_order = SortOrder::Ascending;
+        } else if input.peek(kw::desc) {
+            let _: kw::desc = input.parse()?;
+
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+
+            sort_order = SortOrder::Descending;
+        }
+
+        if input.peek(Token![where]) {
+            let _: Token![where] = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            let str_lit: LitStr = input.parse()?;
+
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+
+            predicate = Some(str_lit.value());
+        }
+
+        Ok(ColumnIndexSpec { unique, sort_order, predicate })
+    }
+
+    fn parse_meta_item_flag(_span: Span) -> Result<Self, Error> {
+        // without any arguments, just return the default config:
+        // non-unique, ascending, total index (no filter predicate)
+        Ok(ColumnIndexSpec::default())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TableIndexSpec {
+    pub unique: bool,
+    pub columns: Punctuated<(IdentOrStr, SortOrder), Token![,]>,
+    pub predicate: Option<String>,
+    pub span: Span,
+}
+
+impl ToTokens for TableIndexSpec {
+    fn to_tokens(&self, ts: &mut TokenStream2) {
+        let &TableIndexSpec { unique, ref columns, ref predicate, span } = self;
+        let predicate_tokens = match predicate {
+            None => quote!(::core::option::Option::<&'static ::core::primitive::str>::None),
+            Some(expr) => quote!(::core::option::Option::Some(#expr)),
+        };
+        let column_names = columns.iter().map(|(col_name, _)| col_name);
+        let sort_orders = columns.iter().map(|&(_, sort_order)| sort_order);
+
+        ts.extend(quote_spanned!{ span =>
+            .add_index(
+                #unique,
+                [#((#column_names, #sort_orders),)*],
+                #predicate_tokens,
+            )
+        });
+    }
+}
+
+impl ParseMetaItem for TableIndexSpec {
+    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+        mod kw {
+            syn::custom_keyword!(unique);
+            syn::custom_keyword!(columns);
+            syn::custom_keyword!(predicate);
+            syn::custom_keyword!(asc);
+            syn::custom_keyword!(desc);
+        }
+
+        let mut unique = false;
+        let mut predicate = None;
+
+        if input.peek(kw::unique) {
+            let _: kw::unique = input.parse()?;
+
+            if input.peek(Token![=]) {
+                let _: Token![=] = input.parse()?;
+                let bool_lit: LitBool = input.parse()?;
+                unique = bool_lit.value();
+            } else {
+                unique = true;
+            }
+
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+
+        let _: kw::columns = input.parse()?;
+        let paren_content;
+        let paren_delims = syn::parenthesized!(paren_content in input);
+        let span = paren_delims.span.join(); // we only care that this is on the right line
+
+        let columns = Punctuated::parse_terminated_with(&paren_content, |inner_stream| {
+            let col_name: IdentOrStr = inner_stream.parse()?;
+            let mut sort_order = SortOrder::default();
+
+            if inner_stream.peek(Token![=]) {
+                let _: Token![=] = inner_stream.parse()?;
+                let lookahead = inner_stream.lookahead1();
+
+                if lookahead.peek(kw::asc) {
+                    let _: kw::asc = inner_stream.parse()?;
+                    sort_order = SortOrder::Ascending;
+                } else if lookahead.peek(kw::desc) {
+                    let _: kw::desc = inner_stream.parse()?;
+                    sort_order = SortOrder::Descending;
+                } else {
+                    return Err(lookahead.error());
+                }
+            }
+
+            Ok((col_name, sort_order))
+        })?;
+
+        if input.peek(Token![,]) {
+            let _: Token![,] = input.parse()?;
+        }
+
+        if input.peek(Token![where]) {
+            let _: Token![where] = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            let str_lit: LitStr = input.parse()?;
+
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+
+            predicate = Some(str_lit.value());
+        }
+
+        Ok(TableIndexSpec { unique, columns, predicate, span })
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub enum SortOrder {
+    #[default]
+    Ascending,
+    Descending,
+}
+
+impl ToTokens for SortOrder {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        tokens.extend(match *self {
+            SortOrder::Ascending => quote!(::nanosql::table::SortOrder::Ascending),
+            SortOrder::Descending => quote!(::nanosql::table::SortOrder::Descending),
+        });
     }
 }
 

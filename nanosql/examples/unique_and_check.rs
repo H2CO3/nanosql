@@ -1,4 +1,4 @@
-use nanosql::{Result, Connection, ConnectionExt, Param, Table};
+use nanosql::{Error, Result, Connection, ConnectionExt, Param, Table};
 
 
 #[derive(Clone, Debug, Param, Table)]
@@ -50,7 +50,10 @@ fn do_it() -> Result<()> {
             floor: 3,
         },
     ]);
-    assert!(result.unwrap_err().to_string().contains("UNIQUE constraint"));
+    let error = result.unwrap_err();
+
+    assert!(matches!(error, Error::Sqlite(_)));
+    assert!(error.to_string().contains("UNIQUE constraint"));
 
     // this should violate the CHECK constraint on the `building_no` column
     let result = conn.insert_batch([
@@ -62,7 +65,10 @@ fn do_it() -> Result<()> {
             floor: 9,
         },
     ]);
-    let err_msg = result.unwrap_err().to_string();
+    let error = result.unwrap_err();
+    let err_msg = error.to_string();
+
+    assert!(matches!(error, Error::Sqlite(_)));
     assert!(err_msg.contains("CHECK constraint"));
     assert!(err_msg.contains("building_no"));
 
@@ -76,7 +82,10 @@ fn do_it() -> Result<()> {
             floor: 987,
         },
     ]);
-    let err_msg = result.unwrap_err().to_string();
+    let error = result.unwrap_err();
+    let err_msg = error.to_string();
+
+    assert!(matches!(error, Error::Sqlite(_)));
     assert!(err_msg.contains("CHECK constraint"));
     assert!(err_msg.contains("floor"));
 

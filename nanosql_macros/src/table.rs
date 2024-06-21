@@ -6,7 +6,8 @@ use syn::ext::IdentExt;
 use quote::quote;
 use deluxe::SpannedValue;
 use crate::util::{
-    ContainerAttributes, FieldAttributes, GeneratedColumnMode, TableForeignKey, IdentOrStr
+    ContainerAttributes, FieldAttributes, GeneratedColumnMode,
+    IdentOrStr, TableIndexSpec, TableForeignKey
 };
 
 
@@ -76,6 +77,7 @@ fn expand_struct(
 
     validate_primary_key(attrs.primary_key.as_ref(), &attrs_for_each_field, &col_name_str)?;
     validate_foreign_keys(&attrs.foreign_key, &attrs_for_each_field, &col_name_str)?;
+    validate_indexes(&attrs.index, &attrs_for_each_field, &col_name_str)?;
     validate_unique_constraints(&attrs.unique, &attrs_for_each_field, &col_name_str)?;
 
     let col_ty = fields.named
@@ -103,6 +105,10 @@ fn expand_struct(
                     quote!(.foreign_key(#table, #column))
                 })
         });
+
+    let index_specs = attrs_for_each_field
+        .iter()
+        .map(|field_attrs| &field_attrs.index);
 
     let uniq_constraint = attrs_for_each_field
         .iter()
@@ -145,6 +151,7 @@ fn expand_struct(
             })
         });
 
+    let table_indexes = &attrs.index;
     let table_primary_key = attrs.primary_key.as_ref().map(|pk| {
         let columns = pk.iter();
         quote!{
@@ -191,6 +198,7 @@ fn expand_struct(
                             )
                             #primary_key
                             #foreign_key
+                            #index_specs
                             #uniq_constraint
                             #check_constraint
                             #default_value
@@ -199,6 +207,7 @@ fn expand_struct(
                 )*
                 #table_primary_key
                 #(#table_foreign_keys)*
+                #(#table_indexes)*
                 #(#table_unique_constraints)*
                 #(#table_check_constraints)*
             }
@@ -304,20 +313,73 @@ fn validate_one_foreign_key(
     }
 
     // ensure that both the referencing and the referenced columns are unique
-    let mut referencing_columns = HashSet::new();
-    let mut referenced_columns = HashSet::new();
+    let mut internal_columns = HashSet::new();
+    let mut external_columns = HashSet::new();
 
-    for (own, other) in &table_fk_spec.columns {
-        if !referencing_columns.insert(own) {
-            return Err(Error::new_spanned(own, "duplicate referencing column in foreign key"));
+    for (own, foreign) in &table_fk_spec.columns {
+        if !internal_columns.insert(own) {
+            return Err(Error::new_spanned(own, "duplicate internal column in foreign key"));
         }
-        if !referenced_columns.insert(other) {
-            return Err(Error::new_spanned(other, "duplicate referenced column in foreign key"));
+        if !external_columns.insert(foreign) {
+            return Err(Error::new_spanned(foreign, "duplicate external column in foreign key"));
         }
     }
 
     // Unlike a PRIMARY KEY, there may be more than one FOREIGN KEY on a table,
     // so we don't need to check for that kind of (non-)conflict. Yay! \o/
+
+    Ok(())
+}
+
+fn validate_indexes(
+    indexes: &[TableIndexSpec],
+    field_attrs: &[FieldAttributes],
+    all_cols: &[String],
+) -> Result<(), Error> {
+    indexes
+        .iter()
+        .try_for_each(|index| validate_one_index(index, field_attrs, all_cols))
+}
+
+fn validate_one_index(
+    index: &TableIndexSpec,
+    field_attrs: &[FieldAttributes],
+    all_cols: &[String],
+) -> Result<(), Error> {
+    assert_eq!(field_attrs.len(), all_cols.len());
+
+    // ensure that the index spec contains at least 1 column
+    if index.columns.is_empty() {
+        return Err(Error::new_spanned(
+            index,
+            "table-level index must refer to at least 1 column"
+        ));
+    }
+
+    // ensure that columns do in fact exist in the table
+    if let Some(err_col) = index.columns
+        .iter()
+        .find_map(|(col, _)| {
+            if all_cols.contains(&col.to_string()) {
+                None
+            } else {
+                Some(col)
+            }
+        })
+    {
+        return Err(Error::new_spanned(
+            err_col,
+            format_args!("unknown column `{err_col}` in table-level index")
+        ));
+    }
+
+    // ensure that the referenced columns are unique
+    let mut column_set = HashSet::new();
+    for (col, _) in &index.columns {
+        if !column_set.insert(col) {
+            return Err(Error::new_spanned(col, "duplicate columns in table-level index"));
+        }
+    }
 
     Ok(())
 }

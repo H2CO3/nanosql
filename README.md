@@ -243,6 +243,5 @@ There are two basic solutions to this problem:
 
 ```sh
 cargo clean
-cargo test --all-features --all
-cargo test --all-features --examples
+cargo test --workspace --all-features --tests --examples
 ```

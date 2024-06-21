@@ -72,10 +72,13 @@ use ordered_float::NotNan;
 ///   empty. You can apply this attribute many times.
 /// * `#[nanosql(check = "SQL expression")]`: adds a table-level `CHECK` constraint,
 ///   which has access to all columns of the table. You can apply this attribute many times.
-/// * `#[nanosql(index(foo = asc, "bar" = desc))]`: adds an explicit index to
-///   the specified tuple, with each column being sorted according to the given direction.
-///   If the sorting direction is not specified, it defaults to `asc`ending.
-///   You can apply this attribute many times to create multiple indexes.
+/// * `#[nanosql(index(unique, columns(foo, "bar" = desc, qux = asc), where = "expression")]`:
+///   adds an explicit index to the specified tuple, with each column being sorted according to
+///   the given direction. If the sorting direction is not specified, it defaults to `asc`ending.
+///   If the `where` clause is specified, a partial index will be created using the predicate.
+///   If `unique` is specified, then uniqueness of tuples _in the index_ will be enforced.
+///   For partial indexes, this is different from the set of columns having all unique tuples.
+///   You may apply this attribute many times to create multiple indexes.
 ///
 /// Supported field-level attributes are:
 ///
@@ -102,9 +105,13 @@ use ordered_float::NotNan;
 ///   relationship between this column and another column of a different table.
 ///   (The table on the other side may also be this table, for representing a
 ///   hierarchy.) You can specify multiple foreign key columns.
-/// * `#[nanosql(index = desc)]`: adds an explicit index on this column
-///   with the specified ordering direction. If the direction is omitted, it
-///   defaults to `asc`ending.
+/// * `#[nanosql(index(unique, desc, where = "predicate"))]`: adds an explicit
+///   index on this column with the specified ordering direction. If direction
+///   is omitted, it defaults to `asc`ending. If `where` is included, a partial
+///   index will be created with the corresponding predicate (bool) expression.
+///   If `unique` is given, the values _in the index_ have to be all distinct.
+///   (For a partial index, this is _not_ the same as the column having unique
+///   values, too!)
 pub trait Table {
     /// The parameter set used for performing `INSERT` queries.
     /// This is often just `Self`, but it may be a differen type,
@@ -261,11 +268,11 @@ impl TableDesc {
     }
 
     /// Adds a table-level index, potentially on multiple columns.
-    pub fn add_index<S1, S2, I>(mut self, unique: bool, predicate: Option<S1>, columns: I) -> Self
+    pub fn add_index<S1, S2, I>(mut self, unique: bool, columns: I, predicate: Option<S2>) -> Self
     where
         S1: Into<String>,
         S2: Into<String>,
-        I: IntoIterator<Item = (S2, SortOrder)>,
+        I: IntoIterator<Item = (S1, SortOrder)>,
     {
         let columns: Vec<_> = columns
             .into_iter()
@@ -275,8 +282,8 @@ impl TableDesc {
         let index = TableIndexSpec {
             table: self.name.clone(),
             id: self.indexes.len() + 1,
-            columns,
             unique,
+            columns,
             predicate: predicate.map(Into::into),
         };
 
@@ -306,8 +313,8 @@ impl TableDesc {
             indexes.push(TableIndexSpec {
                 table: self.name.clone(),
                 id,
-                columns,
                 unique: false,
+                columns,
                 predicate: None,
             });
         }
@@ -416,14 +423,14 @@ impl Column {
     /// Adds an explicit index for this column.
     pub fn set_index(
         mut self,
-        sort_order: SortOrder,
         unique: bool,
+        sort_order: SortOrder,
         predicate: Option<impl Into<String>>,
     ) -> Self {
         self.index = Some(ColumnIndexSpec {
             name: self.name.clone(),
-            sort_order,
             unique,
+            sort_order,
             predicate: predicate.map(Into::into),
         });
         self
@@ -452,8 +459,8 @@ impl Column {
 
                 Some(ColumnIndexSpec {
                     name: self.name.clone(),
-                    sort_order: SortOrder::Ascending,
                     unique: false,
+                    sort_order: SortOrder::Ascending,
                     predicate: None,
                 })
             })
@@ -654,10 +661,10 @@ impl Display for SortOrder {
 pub struct ColumnIndexSpec {
     /// The name of the indexed column.
     pub name: String,
-    /// The order in which the values are sorted in the index.
-    pub sort_order: SortOrder,
     /// Whether items in this index must be unique.
     pub unique: bool,
+    /// The order in which the values are sorted in the index.
+    pub sort_order: SortOrder,
     /// The predicate expression (`WHERE` clause) for a partial index.
     pub predicate: Option<String>,
 }
@@ -669,10 +676,10 @@ pub struct TableIndexSpec {
     pub table: String,
     /// The id of the index. Must be unique within the table that the index belongs to.
     pub id: usize,
-    /// The columns included in this index, from leftmost to rightmost.
-    pub columns: Vec<(String, SortOrder)>,
     /// Whether items in this index must be unique.
     pub unique: bool,
+    /// The columns included in this index, from leftmost to rightmost.
+    pub columns: Vec<(String, SortOrder)>,
     /// The predicate expression (`WHERE` clause) for a partial index.
     pub predicate: Option<String>,
 }
@@ -680,13 +687,13 @@ pub struct TableIndexSpec {
 impl TableIndexSpec {
     /// Turns a single-column index spec into a table-level index spec.
     pub fn single_column(table: String, id: usize, column: ColumnIndexSpec) -> Self {
-        let ColumnIndexSpec { name: col_name, sort_order, unique, predicate } = column;
+        let ColumnIndexSpec { name: col_name, unique, sort_order, predicate } = column;
 
         TableIndexSpec {
             table,
             id,
-            columns: vec![(col_name, sort_order)],
             unique,
+            columns: vec![(col_name, sort_order)],
             predicate,
         }
     }
@@ -697,7 +704,7 @@ impl Query for TableIndexSpec {
     type Output = ();
 
     fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        let &TableIndexSpec { ref table, id, ref columns, unique, ref predicate } = self;
+        let &TableIndexSpec { ref table, id, unique, ref columns, ref predicate } = self;
         let create_stmt = if unique { "CREATE UNIQUE INDEX" } else { "CREATE INDEX" };
         let mut sep = "";
 
