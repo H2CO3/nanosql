@@ -177,7 +177,7 @@ pub struct TableDesc {
     /// The table-level constraints.
     pub constraints: BTreeSet<TableConstraint>,
     /// The table-level indexes.
-    pub indexes: BTreeSet<Vec<ColumnIndexSpec>>,
+    pub indexes: Vec<TableIndexSpec>,
 }
 
 impl TableDesc {
@@ -187,7 +187,7 @@ impl TableDesc {
             name: name.into(),
             columns: Vec::new(),
             constraints: BTreeSet::new(),
-            indexes: BTreeSet::new(),
+            indexes: Vec::new(),
         }
     }
 
@@ -261,20 +261,26 @@ impl TableDesc {
     }
 
     /// Adds a table-level index, potentially on multiple columns.
-    pub fn add_index<S, I>(mut self, columns: I) -> Self
+    pub fn add_index<S1, S2, I>(mut self, unique: bool, predicate: Option<S1>, columns: I) -> Self
     where
-        I: IntoIterator<Item = (S, SortOrder)>,
-        S: Into<String>
+        S1: Into<String>,
+        S2: Into<String>,
+        I: IntoIterator<Item = (S2, SortOrder)>,
     {
-        let column_specs = columns
+        let columns: Vec<_> = columns
             .into_iter()
-            .map(|(name, sort_order)| ColumnIndexSpec {
-                name: name.into(),
-                sort_order,
-            })
+            .map(|(col, order)| (col.into(), order))
             .collect();
 
-        self.indexes.insert(column_specs);
+        let index = TableIndexSpec {
+            table: self.name.clone(),
+            id: self.indexes.len() + 1,
+            columns,
+            unique,
+            predicate: predicate.map(Into::into),
+        };
+
+        self.indexes.push(index);
         self
     }
 
@@ -282,36 +288,42 @@ impl TableDesc {
     ///
     /// This includes explicit indexes added manually, and implicit
     /// indexes (e.g., those created for `FOREIGN KEY` clauses).
-    pub fn index_specs(&self) -> impl Iterator<Item = TableIndexSpec> + '_ {
+    pub fn index_specs(&self) -> Vec<TableIndexSpec> {
         // start with table-level explicit indexes
-        self.indexes
-            .iter()
-            .cloned()
-            .chain(self.constraints.iter().filter_map(|constraint| {
-                // then, append table-level implicit indexes (resulting from FKs etc.)
-                let TableConstraint::ForeignKey { column_pairs, .. } = constraint else {
-                    return None;
-                };
-                Some(
-                    column_pairs
-                        .iter()
-                        .map(|(own_name, _)| ColumnIndexSpec {
-                            name: own_name.clone(),
-                            sort_order: SortOrder::Ascending,
-                        })
-                        .collect()
-                )
-            }))
-            .chain(self.columns.iter().filter_map(|column| {
-                // then, append column-level explicit and implicit indexes as well
-                column.index_spec().map(|index_spec| vec![index_spec])
-            }))
-            .enumerate()
-            .map(|(i, columns)| TableIndexSpec {
+        let mut indexes = self.indexes.clone();
+        let mut next_id = indexes.iter().map(|index| index.id).max().unwrap_or(0) + 1;
+
+        // then, append table-level implicit indexes (resulting from FKs etc.)
+        for constraint in &self.constraints {
+            let TableConstraint::ForeignKey { column_pairs, .. } = constraint else {
+                continue;
+            };
+            let columns = column_pairs
+                .iter()
+                .map(|(own_name, _)| (own_name.clone(), SortOrder::Ascending))
+                .collect();
+
+            indexes.push(TableIndexSpec {
                 table: self.name.clone(),
-                id: i + 1,
+                id: next_id,
                 columns,
-            })
+                unique: false,
+                predicate: None,
+            });
+
+            next_id += 1;
+        }
+
+        // then, append column-level explicit and implicit indexes as well
+        for column in &self.columns {
+            let Some(col_spec) = column.index_spec() else { continue };
+            let spec = TableIndexSpec::single_column(self.name.clone(), next_id, col_spec);
+
+            indexes.push(spec);
+            next_id += 1;
+        }
+
+        indexes
     }
 }
 
@@ -325,7 +337,7 @@ pub struct Column {
     /// The set of constraints imposed on the column.
     pub constraints: BTreeSet<ColumnConstraint>,
     /// The index on this column, if any.
-    pub index: Option<SortOrder>,
+    pub index: Option<ColumnIndexSpec>,
 }
 
 impl Column {
@@ -404,8 +416,18 @@ impl Column {
     }
 
     /// Adds an explicit index for this column.
-    pub fn set_index(mut self, sort_order: SortOrder) -> Self {
-        self.index = Some(sort_order);
+    pub fn set_index(
+        mut self,
+        sort_order: SortOrder,
+        unique: bool,
+        predicate: Option<impl Into<String>>,
+    ) -> Self {
+        self.index = Some(ColumnIndexSpec {
+            name: self.name.clone(),
+            sort_order,
+            unique,
+            predicate: predicate.map(Into::into),
+        });
         self
     }
 
@@ -419,22 +441,23 @@ impl Column {
     /// Returns the column name and the `SortOrder` associated with an index on this column,
     /// if any. This may be either an explicit or an implicit index (e.g., a FOREIGN KEY).
     pub fn index_spec(&self) -> Option<ColumnIndexSpec> {
-        // If there is an explicit index, always respect its order.
-        if let Some(sort_order) = self.index {
-            return Some(ColumnIndexSpec {
-                name: self.name.clone(),
-                sort_order
-            });
+        if let Some(index) = self.index.as_ref() {
+            return Some(index.clone());
         }
 
-        // If there's no explicit index, but there is a foreign
-        // key constraint, create an (ascending) implicit index.
         self.constraints
             .iter()
-            .find(|c| matches!(c, ColumnConstraint::ForeignKey { .. }))
-            .map(|_| ColumnIndexSpec {
-                name: self.name.clone(),
-                sort_order: SortOrder::Ascending,
+            .find_map(|c| {
+                let ColumnConstraint::ForeignKey { .. } = c else {
+                    return None;
+                };
+
+                Some(ColumnIndexSpec {
+                    name: self.name.clone(),
+                    sort_order: SortOrder::Ascending,
+                    unique: false,
+                    predicate: None,
+                })
             })
     }
 }
@@ -629,30 +652,46 @@ impl Display for SortOrder {
 }
 
 /// The properties of an index, corresponding to a single column.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ColumnIndexSpec {
     /// The name of the indexed column.
     pub name: String,
     /// The order in which the values are sorted in the index.
     pub sort_order: SortOrder,
-}
-
-impl Display for ColumnIndexSpec {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        let ColumnIndexSpec { name, sort_order } = self;
-        write!(formatter, r#""{name}" {sort_order}"#)
-    }
+    /// Whether items in this index must be unique.
+    pub unique: bool,
+    /// The predicate expression (`WHERE` clause) for a partial index.
+    pub predicate: Option<String>,
 }
 
 /// The properties of a potentially multi-column index on a table.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TableIndexSpec {
     /// The name of the table that this index is indexing.
     pub table: String,
     /// The id of the index. Must be unique within the table that the index belongs to.
     pub id: usize,
     /// The columns included in this index, from leftmost to rightmost.
-    pub columns: Vec<ColumnIndexSpec>,
+    pub columns: Vec<(String, SortOrder)>,
+    /// Whether items in this index must be unique.
+    pub unique: bool,
+    /// The predicate expression (`WHERE` clause) for a partial index.
+    pub predicate: Option<String>,
+}
+
+impl TableIndexSpec {
+    /// Turns a single-column index spec into a table-level index spec.
+    pub fn single_column(table: String, id: usize, column: ColumnIndexSpec) -> Self {
+        let ColumnIndexSpec { name: col_name, sort_order, unique, predicate } = column;
+
+        TableIndexSpec {
+            table,
+            id,
+            columns: vec![(col_name, sort_order)],
+            unique,
+            predicate,
+        }
+    }
 }
 
 impl Query for TableIndexSpec {
@@ -660,20 +699,27 @@ impl Query for TableIndexSpec {
     type Output = ();
 
     fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        let TableIndexSpec { table, id, columns } = self;
+        let &TableIndexSpec { ref table, id, ref columns, unique, ref predicate } = self;
+        let create_stmt = if unique { "CREATE UNIQUE INDEX" } else { "CREATE INDEX" };
         let mut sep = "";
 
         write!(
             formatter,
-            r#"CREATE INDEX IF NOT EXISTS "__nanosql_index_{table}_{id}" ON "{table}"("#,
+            r#"{create_stmt} IF NOT EXISTS "__nanosql_index_{table}_{id}" ON "{table}"("#,
         )?;
 
-        for col in columns {
-            write!(formatter, "{sep}\n    {col}")?;
+        for (col_name, sort_order) in columns {
+            write!(formatter, "{sep}\n    \"{col_name}\" {sort_order}")?;
             sep = ",";
         }
 
-        formatter.write_str("\n);")
+        formatter.write_str("\n)")?;
+
+        if let Some(predicate) = predicate.as_ref() {
+            write!(formatter, " WHERE (\n    {predicate}\n)")?;
+        }
+
+        formatter.write_char(';')
     }
 }
 

@@ -95,6 +95,7 @@ impl ConnectionExt for Connection {
         // Then, create indexes: table-level and field-level, explicit and implicit
         T::description()
             .index_specs()
+            .iter()
             .try_for_each(|spec| self.compile_invoke(spec, ()))
     }
 
