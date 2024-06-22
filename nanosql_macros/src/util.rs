@@ -58,6 +58,24 @@ pub fn add_bounds(
     Ok(where_clause)
 }
 
+/// Helper for implementing `ParseMetaItem` for more complex types
+macro_rules! return_ok_if_eof_or_trailing {
+    (stream: $stream:expr, sep: $sep:ty, value: $value:expr $(,)?) => {
+        // if we are already at EOF, return
+        if $stream.is_empty() {
+            return Ok($value);
+        }
+
+        // otherwise, expect a separator
+        let _: $sep = $stream.parse()?;
+
+        // if this was a trailing separator, return
+        if $stream.is_empty() {
+            return Ok($value);
+        }
+    }
+}
+
 /// Top-level attributes on a struct or enum definition.
 #[derive(Clone, Debug, ParseAttributes)]
 #[deluxe(attributes(nanosql))]
@@ -189,9 +207,7 @@ impl ParseMetaItem for ColumnIndexSpec {
             syn::custom_keyword!(desc);
         }
 
-        let mut unique = false;
-        let mut sort_order = SortOrder::default();
-        let mut predicate = None;
+        let mut index_spec = ColumnIndexSpec::default();
 
         if input.peek(kw::unique) {
             let _: kw::unique = input.parse()?;
@@ -199,32 +215,36 @@ impl ParseMetaItem for ColumnIndexSpec {
             if input.peek(Token![=]) {
                 let _: Token![=] = input.parse()?;
                 let bool_lit: LitBool = input.parse()?;
-                unique = bool_lit.value();
+                index_spec.unique = bool_lit.value();
             } else {
-                unique = true;
+                index_spec.unique = true;
             }
 
-            if input.peek(Token![,]) {
-                let _: Token![,] = input.parse()?;
-            }
+            return_ok_if_eof_or_trailing!(
+                stream: input,
+                sep: Token![,],
+                value: index_spec,
+            );
         }
 
         if input.peek(kw::asc) {
             let _: kw::asc = input.parse()?;
+            index_spec.sort_order = SortOrder::Ascending;
 
-            if input.peek(Token![,]) {
-                let _: Token![,] = input.parse()?;
-            }
-
-            sort_order = SortOrder::Ascending;
+            return_ok_if_eof_or_trailing!(
+                stream: input,
+                sep: Token![,],
+                value: index_spec,
+            );
         } else if input.peek(kw::desc) {
             let _: kw::desc = input.parse()?;
+            index_spec.sort_order = SortOrder::Descending;
 
-            if input.peek(Token![,]) {
-                let _: Token![,] = input.parse()?;
-            }
-
-            sort_order = SortOrder::Descending;
+            return_ok_if_eof_or_trailing!(
+                stream: input,
+                sep: Token![,],
+                value: index_spec,
+            );
         }
 
         if input.peek(Token![where]) {
@@ -232,14 +252,15 @@ impl ParseMetaItem for ColumnIndexSpec {
             let _: Token![=] = input.parse()?;
             let str_lit: LitStr = input.parse()?;
 
+            index_spec.predicate = Some(str_lit.value());
+
+            // eat trailing comma, if any
             if input.peek(Token![,]) {
                 let _: Token![,] = input.parse()?;
             }
-
-            predicate = Some(str_lit.value());
         }
 
-        Ok(ColumnIndexSpec { unique, sort_order, predicate })
+        Ok(index_spec)
     }
 
     fn parse_meta_item_flag(_span: Span) -> Result<Self, Error> {
@@ -255,6 +276,17 @@ pub struct TableIndexSpec {
     pub columns: Punctuated<(IdentOrStr, SortOrder), Token![,]>,
     pub predicate: Option<String>,
     pub span: Span,
+}
+
+impl Default for TableIndexSpec {
+    fn default() -> Self {
+        TableIndexSpec {
+            unique: false,
+            columns: Punctuated::new(),
+            predicate: None,
+            span: Span::call_site(),
+        }
+    }
 }
 
 impl ToTokens for TableIndexSpec {
@@ -287,8 +319,7 @@ impl ParseMetaItem for TableIndexSpec {
             syn::custom_keyword!(desc);
         }
 
-        let mut unique = false;
-        let mut predicate = None;
+        let mut index_spec = TableIndexSpec::default();
 
         if input.peek(kw::unique) {
             let _: kw::unique = input.parse()?;
@@ -296,22 +327,22 @@ impl ParseMetaItem for TableIndexSpec {
             if input.peek(Token![=]) {
                 let _: Token![=] = input.parse()?;
                 let bool_lit: LitBool = input.parse()?;
-                unique = bool_lit.value();
+                index_spec.unique = bool_lit.value();
             } else {
-                unique = true;
+                index_spec.unique = true;
             }
 
-            if input.peek(Token![,]) {
-                let _: Token![,] = input.parse()?;
-            }
+            // unconditionally expect a comma because the following `columns` part is mandatory
+            let _: Token![,] = input.parse()?;
         }
 
         let _: kw::columns = input.parse()?;
         let paren_content;
         let paren_delims = syn::parenthesized!(paren_content in input);
-        let span = paren_delims.span.join(); // we only care that this is on the right line
 
-        let columns = Punctuated::parse_terminated_with(&paren_content, |inner_stream| {
+        // we only care that this is on the right line
+        index_spec.span = paren_delims.span.join();
+        index_spec.columns = Punctuated::parse_terminated_with(&paren_content, |inner_stream| {
             let col_name: IdentOrStr = inner_stream.parse()?;
             let mut sort_order = SortOrder::default();
 
@@ -333,23 +364,22 @@ impl ParseMetaItem for TableIndexSpec {
             Ok((col_name, sort_order))
         })?;
 
-        if input.peek(Token![,]) {
-            let _: Token![,] = input.parse()?;
-        }
+        return_ok_if_eof_or_trailing!(stream: input, sep: Token![,], value: index_spec);
 
         if input.peek(Token![where]) {
             let _: Token![where] = input.parse()?;
             let _: Token![=] = input.parse()?;
             let str_lit: LitStr = input.parse()?;
 
+            index_spec.predicate = Some(str_lit.value());
+
+            // eat trailing comma, if any
             if input.peek(Token![,]) {
                 let _: Token![,] = input.parse()?;
             }
-
-            predicate = Some(str_lit.value());
         }
 
-        Ok(TableIndexSpec { unique, columns, predicate, span })
+        Ok(index_spec)
     }
 }
 
