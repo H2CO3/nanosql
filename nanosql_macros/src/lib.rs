@@ -10,21 +10,25 @@ mod as_sql_ty;
 mod util;
 
 
+/// See the documentation of the `Param` trait for details.
 #[proc_macro_derive(Param, attributes(nanosql))]
 pub fn derive_param(ts: TokenStream) -> TokenStream {
     util::expand(ts, param::expand)
 }
 
+/// See the documentation of the `ResultRecord` trait for details.
 #[proc_macro_derive(ResultRecord, attributes(nanosql))]
 pub fn derive_result_record(ts: TokenStream) -> TokenStream {
     util::expand(ts, result_record::expand)
 }
 
+/// See the documentation of the `Table` trait for details.
 #[proc_macro_derive(Table, attributes(nanosql))]
 pub fn derive_table(ts: TokenStream) -> TokenStream {
     util::expand(ts, table::expand)
 }
 
+/// See the documentation of the `InsertInput` trait for details.
 #[proc_macro_derive(InsertInput, attributes(nanosql))]
 pub fn derive_insert_input(ts: TokenStream) -> TokenStream {
     util::expand(ts, insert_input::expand)
@@ -52,6 +56,7 @@ pub fn derive_from_sql(ts: TokenStream) -> TokenStream {
     util::expand(ts, from_sql::expand)
 }
 
+/// See the documentation of the `AsSqlTy` trait for details.
 #[proc_macro_derive(AsSqlTy, attributes(nanosql))]
 pub fn derive_as_sql_ty(ts: TokenStream) -> TokenStream {
     util::expand(ts, as_sql_ty::expand)
