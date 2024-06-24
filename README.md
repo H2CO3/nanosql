@@ -217,15 +217,15 @@ There are two basic solutions to this problem:
 ## Cargo Features
 
 * `derive`: activates procedural macros - mostly custom `#[derive]`s for commonly-used traits.
-  **Activated by default.**
+  **Enabled by default.**
 * `expr-check`: uses the `sqlparser` crate to check for syntax errors in raw SQL expressions
   in derive macro attributes at compile time. This ensures that any generated SQL will be valid
   and syntax error in user-supplied SQL code will be clearly pinpointed, instead of causing
-  mysterious statement preparation errors at runtime. **Activated by default.**
+  mysterious statement preparation errors at runtime. **Enabled by default.**
 * `not-nan`: implements `Param` and `ResultRecord` for `ordered_float::NotNan`. This allows for
   a more type-safe interface in queries: since SQLite treats `NaN` as the SQL `NULL` value, you
   may run into surprising errors when binding or retrieving an `f32::NAN` or `f64::NAN` and the
-  corresponding parameter needs to be `NOT NULL`, or the soruce column *can* be `NULL`.
+  corresponding parameter needs to be `NOT NULL`, or the source column *can* be `NULL`.
 * `pretty-eqp`: use the `ptree` crate to pretty print the results of `EXPLAIN QUERY PLAN`. This
   will impl `Display` for `QueryPlan`, the return type of [`ConnectionExt::explain_query_plan()`],
   which renders the tree in a nice, human-readable format using ASCII art.
