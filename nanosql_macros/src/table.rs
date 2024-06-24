@@ -6,8 +6,7 @@ use syn::ext::IdentExt;
 use quote::quote;
 use deluxe::SpannedValue;
 use crate::util::{
-    ContainerAttributes, FieldAttributes, GeneratedColumnMode,
-    IdentOrStr, TableIndexSpec, TableForeignKey
+    ContainerAttributes, FieldAttributes, IdentOrStr, TableIndexSpec, TableForeignKey,
 };
 
 
@@ -95,16 +94,7 @@ fn expand_struct(
 
     let foreign_key = attrs_for_each_field
         .iter()
-        .map(|field_attrs| {
-            field_attrs
-                .foreign_key
-                .as_ref()
-                .map(|fk| {
-                    let table = &fk.table;
-                    let column = &fk.column;
-                    quote!(.foreign_key(#table, #column))
-                })
-        });
+        .map(|field_attrs| field_attrs.foreign_key.as_ref());
 
     let index_specs = attrs_for_each_field
         .iter()
@@ -136,20 +126,7 @@ fn expand_struct(
 
     let generated = attrs_for_each_field
         .iter()
-        .map(|field_attrs| {
-            field_attrs.generated.as_ref().map(|spec| {
-                let expr = &spec.expr;
-
-                match spec.mode {
-                    GeneratedColumnMode::Virtual => quote!{
-                        .generate_virtual(#expr)
-                    },
-                    GeneratedColumnMode::Stored => quote!{
-                        .generate_stored(#expr)
-                    },
-                }
-            })
-        });
+        .map(|field_attrs| field_attrs.generated.as_ref());
 
     let table_primary_key = attrs.primary_key.as_ref().map(|pk| {
         let columns = pk.iter();

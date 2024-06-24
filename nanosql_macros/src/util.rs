@@ -208,6 +208,17 @@ pub struct ColumnForeignKey {
     pub column: IdentOrStr,
 }
 
+impl ToTokens for ColumnForeignKey {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let table = &self.table;
+        let column = &self.column;
+
+        tokens.extend(quote!{
+            .foreign_key(#table, #column)
+        });
+    }
+}
+
 impl ParseMetaItem for ColumnForeignKey {
     fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
         let table: IdentOrStr = input.parse()?;
@@ -494,6 +505,21 @@ impl ParseMetaItem for TableForeignKey {
 pub struct GeneratedColumnSpec {
     pub mode: GeneratedColumnMode,
     pub expr: SqlExprStr,
+}
+
+impl ToTokens for GeneratedColumnSpec {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let expr = &self.expr;
+
+        tokens.extend(match self.mode {
+            GeneratedColumnMode::Virtual => quote!{
+                .generate_virtual(#expr)
+            },
+            GeneratedColumnMode::Stored => quote!{
+                .generate_stored(#expr)
+            },
+        });
+    }
 }
 
 impl ParseMetaItem for GeneratedColumnSpec {
