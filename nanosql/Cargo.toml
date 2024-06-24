@@ -17,3 +17,23 @@ compiletest_rs = "0.11.0"
 derive = ["dep:nanosql_macros"]
 not-nan = ["dep:ordered-float"]
 pretty-eqp = ["dep:ptree"]
+
+[[example]]
+name = "derive"
+test = true
+harness = false
+
+[[example]]
+name = "indexes"
+test = true
+harness = false
+
+[[example]]
+name = "foreign_key"
+test = true
+harness = false
+
+[[example]]
+name = "unique_and_check"
+test = true
+harness = false

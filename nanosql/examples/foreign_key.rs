@@ -57,7 +57,7 @@ nanosql::define_query!{
     }
 }
 
-fn do_it() -> Result<()> {
+fn main() -> Result<()> {
     let query = CreateTable::<Employee>::default();
     let sql_disp = query.display_sql();
     let sql = sql_disp.to_string();
@@ -87,7 +87,7 @@ fn do_it() -> Result<()> {
     ));
 
     // Ensure that the correct indexes are automatically created for the FOREIGN KEY columns.
-    let conn = Connection::open_in_memory()?;
+    let mut conn = Connection::connect_in_memory()?;
 
     conn.create_table::<Department>()?;
     conn.create_table::<BogusTable>()?;
@@ -137,20 +137,4 @@ fn do_it() -> Result<()> {
     }
 
     Ok(())
-}
-
-// Run it both as an example as well as during testing
-
-fn main() -> Result<()> {
-    do_it()
-}
-
-#[cfg(test)]
-mod tests {
-    use nanosql::Result;
-
-    #[test]
-    fn do_it() -> Result<()> {
-        super::do_it()
-    }
 }

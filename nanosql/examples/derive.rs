@@ -70,10 +70,9 @@ nanosql::define_query! {
     }
 }
 
-/// This is the bulk of the actual logic.
-fn do_it() -> Result<()> {
+fn main() -> Result<()> {
     // First, we open a database connection.
-    let mut conn = Connection::open_in_memory()?;
+    let mut conn = Connection::connect_in_memory()?;
 
     conn.create_table::<MusicalInstrument>()?;
     conn.insert_batch([
@@ -154,20 +153,4 @@ fn do_it() -> Result<()> {
     assert!(dup_multi_col_pk_result.is_err(), "duplicate multi-column PK must not be allowed");
 
     Ok(())
-}
-
-// Run it both as an example as well as during testing
-
-fn main() -> Result<()> {
-    do_it()
-}
-
-#[cfg(test)]
-mod tests {
-    use nanosql::Result;
-
-    #[test]
-    fn do_it() -> Result<()> {
-        super::do_it()
-    }
 }

@@ -157,7 +157,7 @@ impl<Q: Query + ?Sized> Display for SqlDisplay<Q> {
 /// }
 ///
 /// fn main() -> Result<()> {
-///     let mut conn = Connection::open_in_memory()?;
+///     let mut conn = Connection::connect_in_memory()?;
 /// #
 /// #   conn.create_table::<Employee>()?;
 /// #   conn.insert_batch([

@@ -143,10 +143,9 @@ where
 /// into a given table. This is only a type-level marker, of which
 /// the sole purpose is to link the table being inserted into via
 /// the `Table` associated type. This is purely for convenience:
-/// it allows us to avoid type annotations on the insertion methods
+/// it allows us to avoid type annotations on the insertion method
 /// of [`ConnectionExt`](crate::conn::ConnectionExt), namely:
-/// [`insert_batch`](crate::conn::ConnectionExt::insert_batch) and
-/// [`insert_batch_no_txn`](crate::conn::ConnectionExt::insert_batch_no_txn).
+/// [`insert_batch`](crate::conn::ConnectionExt::insert_batch).
 ///
 /// A convenience blanket impl is provided for types that implement both
 /// `Table` and `Param`, so that no additional `#[derive(InsertInput)]` is

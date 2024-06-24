@@ -78,8 +78,8 @@ struct ComplexTable {
     number: i64,
 }
 
-fn do_it() -> Result<()> {
-    let mut conn = Connection::open_in_memory()?;
+fn main() -> Result<()> {
+    let mut conn = Connection::connect_in_memory()?;
 
     conn.create_table::<Author>()?;
     conn.create_table::<Publication>()?;
@@ -289,20 +289,4 @@ fn do_it() -> Result<()> {
     ]);
 
     Ok(())
-}
-
-// Run it both as an example as well as during testing
-
-fn main() -> Result<()> {
-    do_it()
-}
-
-#[cfg(test)]
-mod tests {
-    use nanosql::Result;
-
-    #[test]
-    fn do_it() -> Result<()> {
-        super::do_it()
-    }
 }

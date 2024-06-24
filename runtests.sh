@@ -3,4 +3,4 @@
 set -eu
 
 cargo clean
-cargo test --workspace --all-features --tests --examples
+cargo test --workspace --all-features

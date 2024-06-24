@@ -120,7 +120,7 @@ impl Query for PetById {
 
 fn main() -> Result<()> {
     // First, we open a database connection.
-    let mut conn = Connection::open_in_memory()?;
+    let mut conn = Connection::connect_in_memory()?;
     
     // Then, we ensure that the table exists in the schema.
     conn.create_table::<Pet>()?;
@@ -239,9 +239,9 @@ There are two basic solutions to this problem:
    encounter `E0464` errors (e.g., "multiple candidates for `rlib` dependency `nanosql` found"),
    then run `cargo clean` before running `cargo test compile_fail --all-features`.
 
-**TL;DR:** the best "lazy" way to run tests is:
+**TL;DR:** the best "lazy" way to run tests is the `./runtests.sh` script, which just does:
 
 ```sh
 cargo clean
-cargo test --workspace --all-features --tests --examples
+cargo test --workspace --all-features
 ```

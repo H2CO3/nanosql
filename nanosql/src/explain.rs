@@ -36,7 +36,7 @@ use {
 /// }
 ///
 /// # fn main() -> nanosql::Result<()> {
-/// let conn = Connection::open_in_memory()?;
+/// let mut conn = Connection::connect_in_memory()?;
 ///
 /// conn.create_table::<TestTable>()?;
 ///
@@ -156,7 +156,7 @@ impl ResultRecord for VdbeInstruction {
 /// }
 ///
 /// # fn main() -> nanosql::Result<()> {
-/// let conn = Connection::open_in_memory()?;
+/// let mut conn = Connection::connect_in_memory()?;
 ///
 /// conn.create_table::<TestTable>()?;
 ///
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn explain_complex_query_plan() -> Result<()> {
-        let conn = Connection::open_in_memory()?;
+        let conn = Connection::connect_in_memory()?;
         conn.execute("CREATE TABLE t1(a, b);", [])?;
         conn.execute("CREATE TABLE t2(c, d);", [])?;
 
