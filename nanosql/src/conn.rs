@@ -72,7 +72,7 @@ pub trait ConnectionExt: Sealed {
     /// Compiles a query and immediately invokes it. **This is a convenience
     /// function that should not in general be used when a query is to be
     /// executed many times.** Use [`TransactionExt::invoke_batch()`] instead for
-    /// immediately invoking a query in a loop, or [`ConnextionExt::compile()`]
+    /// immediately invoking a query in a loop, or [`ConnectionExt::compile()`]
     /// followed by [`CompiledStatement::invoke()`] for invoking a statement
     /// potentially many times but outside a lexical loop (e.g., in a callback
     /// or an HTTP API handler).
