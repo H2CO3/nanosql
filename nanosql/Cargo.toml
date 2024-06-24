@@ -2,6 +2,12 @@
 name = "nanosql"
 version = "0.1.0"
 edition = "2021"
+authors = ["Arpad Goretity 'H2CO3' <arpad.goretity@gmail.com>"]
+description = "Tiny, strongly-typed data mapper for SQLite"
+license = "MIT"
+documentation = "https://docs.rs/nanosql"
+homepage = "https://github.com/H2CO3/nanosql"
+repository = "https://github.com/H2CO3/nanosql"
 
 [dependencies]
 rusqlite = { version = "0.31.0", features = ["modern_sqlite"] }

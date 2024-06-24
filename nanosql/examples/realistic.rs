@@ -110,7 +110,8 @@ define_query!{
         ORDER BY level DESC
         "#
     }
-    /// Retrieves all names of the given taxon.
+    /// Retrieves all names of the given taxon. Always returns at least one record.
+    #[allow(non_camel_case_types)]
     TAXON_WITH_NAMES<'p>: u64 => Vec<NamedTaxon> {
         r#"
         -- Use a LEFT JOIN in order to force the database to always
