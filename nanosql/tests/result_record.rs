@@ -13,7 +13,7 @@ struct Fruit {
 
 const SQL: &str = "SELECT name, color, energy FROM fruit ORDER BY name LIMIT ?";
 
-crate::define_query!{
+define_query!{
     OptQueryWithLimit<'p>: usize => Option<Fruit> {
         SQL
     }
