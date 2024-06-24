@@ -14,7 +14,9 @@ nanosql_macros = { path = "../nanosql_macros", version = "0.1.0", optional = tru
 compiletest_rs = "0.11.0"
 
 [features]
+default = ["derive", "expr-check"]
 derive = ["dep:nanosql_macros"]
+expr-check = ["nanosql_macros/expr-check"]
 not-nan = ["dep:ordered-float"]
 pretty-eqp = ["dep:ptree"]
 

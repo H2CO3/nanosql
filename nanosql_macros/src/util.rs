@@ -112,7 +112,7 @@ pub struct ContainerAttributes {
     pub unique: Vec<SpannedValue<Vec<IdentOrStr>>>,
     /// For `#[derive(Table)]`: applies additional `CHECK` constraints.
     #[deluxe(append)]
-    pub check: Vec<String>,
+    pub check: Vec<SqlExprStr>,
 }
 
 /// Attributes on a struct field or an enum variant.
@@ -138,13 +138,68 @@ pub struct FieldAttributes {
     pub unique: bool,
     /// For `#[derive(Table)]`: applies additional CHECK constraints.
     #[deluxe(append)]
-    pub check: Vec<String>,
+    pub check: Vec<SqlExprStr>,
     /// For `#[derive(Table)]`: provides a default value when column
     /// value is omitted during insertion.
-    pub default: Option<String>,
+    pub default: Option<SqlExprStr>,
     /// For `#[derive(Table)]`: specifies that the column should be
     /// generated based on some expression involving other columns.
     pub generated: Option<GeneratedColumnSpec>,
+}
+
+/// Ensures that an SQL expression that is going to be interpolated
+/// verbatim into the generated SQL is at leasy syntactically valid.
+/// This transparently parses from/serializes to a string literal,
+/// and if the `expr-check` feature is enabled, it validates the
+/// syntax of its contetns, as if it were an SQL expression.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct SqlExprStr {
+    /// A `LitStr` and not a plain `String`, to preserve span information
+    sql: LitStr,
+}
+
+#[cfg(feature = "expr-check")]
+impl SqlExprStr {
+    fn check_sql_expr_syntax(fragment: &LitStr) -> Result<(), Error> {
+        let value = fragment.value();
+        let dialect = sqlparser::dialect::SQLiteDialect {};
+        let mut parser = sqlparser::parser::Parser::new(&dialect)
+            .try_with_sql(&value)
+            .map_err(|sqlerr| Error::new_spanned(fragment, sqlerr))?;
+
+        // parse the SQL expression into an AST but throw it away; only forward errors
+        let _ = parser
+            .parse_expr()
+            .map_err(|sqlerr| Error::new_spanned(fragment, sqlerr))?;
+
+        // ensure there isn't any trailing junk
+        parser
+            .expect_token(&sqlparser::tokenizer::Token::EOF)
+            .map_err(|sqlerr| Error::new_spanned(fragment, sqlerr))
+    }
+}
+
+impl Parse for SqlExprStr {
+    fn parse(input: ParseStream<'_>) -> Result<Self, Error> {
+        let sql: LitStr = input.parse()?;
+
+        #[cfg(feature = "expr-check")]
+        SqlExprStr::check_sql_expr_syntax(&sql)?;
+
+        Ok(SqlExprStr { sql })
+    }
+}
+
+impl ToTokens for SqlExprStr {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        self.sql.to_tokens(tokens);
+    }
+}
+
+impl ParseMetaItem for SqlExprStr {
+    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+        input.parse::<SqlExprStr>()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -177,7 +232,7 @@ impl ParseMetaItem for ColumnForeignKey {
 pub struct ColumnIndexSpec {
     pub unique: bool,
     pub sort_order: SortOrder,
-    pub predicate: Option<String>,
+    pub predicate: Option<SqlExprStr>,
 }
 
 impl ToTokens for ColumnIndexSpec {
@@ -250,9 +305,9 @@ impl ParseMetaItem for ColumnIndexSpec {
         if input.peek(Token![where]) {
             let _: Token![where] = input.parse()?;
             let _: Token![=] = input.parse()?;
-            let str_lit: LitStr = input.parse()?;
+            let predicate: SqlExprStr = input.parse()?;
 
-            index_spec.predicate = Some(str_lit.value());
+            index_spec.predicate = Some(predicate);
 
             // eat trailing comma, if any
             if input.peek(Token![,]) {
@@ -274,7 +329,7 @@ impl ParseMetaItem for ColumnIndexSpec {
 pub struct TableIndexSpec {
     pub unique: bool,
     pub columns: Punctuated<(IdentOrStr, SortOrder), Token![,]>,
-    pub predicate: Option<String>,
+    pub predicate: Option<SqlExprStr>,
     pub span: Span,
 }
 
@@ -369,9 +424,9 @@ impl ParseMetaItem for TableIndexSpec {
         if input.peek(Token![where]) {
             let _: Token![where] = input.parse()?;
             let _: Token![=] = input.parse()?;
-            let str_lit: LitStr = input.parse()?;
+            let predicate: SqlExprStr = input.parse()?;
 
-            index_spec.predicate = Some(str_lit.value());
+            index_spec.predicate = Some(predicate);
 
             // eat trailing comma, if any
             if input.peek(Token![,]) {
@@ -438,15 +493,14 @@ impl ParseMetaItem for TableForeignKey {
 #[derive(Clone, Debug)]
 pub struct GeneratedColumnSpec {
     pub mode: GeneratedColumnMode,
-    pub expr: String,
+    pub expr: SqlExprStr,
 }
 
 impl ParseMetaItem for GeneratedColumnSpec {
     fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
         let mode: GeneratedColumnMode = input.parse()?;
         let _eq: Token![=] = input.parse()?;
-        let lit: LitStr = input.parse()?;
-        let expr = lit.value();
+        let expr: SqlExprStr = input.parse()?;
 
         Ok(GeneratedColumnSpec { mode, expr })
     }

@@ -217,6 +217,11 @@ There are two basic solutions to this problem:
 ## Cargo Features
 
 * `derive`: activates procedural macros - mostly custom `#[derive]`s for commonly-used traits.
+  **Activated by default.**
+* `expr-check`: uses the `sqlparser` crate to check for syntax errors in raw SQL expressions
+  in derive macro attributes at compile time. This ensures that any generated SQL will be valid
+  and syntax error in user-supplied SQL code will be clearly pinpointed, instead of causing
+  mysterious statement preparation errors at runtime. **Activated by default.**
 * `not-nan`: implements `Param` and `ResultRecord` for `ordered_float::NotNan`. This allows for
   a more type-safe interface in queries: since SQLite treats `NaN` as the SQL `NULL` value, you
   may run into surprising errors when binding or retrieving an `f32::NAN` or `f64::NAN` and the

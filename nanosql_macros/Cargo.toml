@@ -12,3 +12,7 @@ syn = "2.0.66"
 quote = "1.0.36"
 deluxe = "0.5.0"
 heck = "0.5.0"
+sqlparser = { version = "0.47.0", optional = true }
+
+[features]
+expr-check = ["dep:sqlparser"]

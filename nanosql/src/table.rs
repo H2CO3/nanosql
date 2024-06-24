@@ -72,10 +72,14 @@ use ordered_float::NotNan;
 ///   empty. You can apply this attribute many times.
 /// * `#[nanosql(check = "SQL expression")]`: adds a table-level `CHECK` constraint,
 ///   which has access to all columns of the table. You can apply this attribute many times.
+///   The derive macro will ensure that the expression you specify is syntactically valid.
 /// * `#[nanosql(index(unique, columns(foo, "bar" = desc, qux = asc), where = "expression")]`:
 ///   adds an explicit index to the specified tuple, with each column being sorted according to
 ///   the given direction. If the sorting direction is not specified, it defaults to `asc`ending.
+///
 ///   If the `where` clause is specified, a partial index will be created using the predicate.
+///   (The derive macro will ensure that the predicate is syntactically valid.)
+///
 ///   If `unique` is specified, then uniqueness of tuples _in the index_ will be enforced.
 ///   For partial indexes, this is different from the set of columns having all unique tuples.
 ///   You may apply this attribute many times to create multiple indexes.
@@ -89,13 +93,16 @@ use ordered_float::NotNan;
 ///   to the specified type, instead of using the field's own declared type.
 /// * `#[nanosql(unique)]`: imposes an SQL `UNIQUE` constraint on the field.
 /// * `#[nanosql(check = "expression1", check = "expression2", ...)]`:
-///    imposes additional `CHECK` constraints.
+///    imposes additional `CHECK` constraints. The derive macro will ensure
+///    that the expression you specify is syntactically valid.
 /// * `#[nanosql(default = "expression")]`: apply a default value (literal
 ///   or full-blown SQL expression) upon an `INSERT` statements, when the
-///   value for the column is omitted.
+///   value for the column is omitted. The derive macro will ensure that
+///   the expression you specify is syntactically valid.
 /// * `#[nanosql(generated(virtual = "expression"))]` or
 ///   `#[nanosql(generated(stored = "expression"))]`: declares the column
-///   as `GENERATED ALWAYS [VIRTUAL | STORED]`.
+///   as `GENERATED ALWAYS [VIRTUAL | STORED]`. The derive macro will ensure
+///   that the expression you specify is syntactically valid.
 /// * `#[nanosql(primary_key)]` or `#[nanosql(pk)]`: defines the column as
 ///   the `PRIMARY KEY` of the table. This may only be used on a single column
 ///   within any given table. This attribute may not be used together with the
@@ -107,11 +114,15 @@ use ordered_float::NotNan;
 ///   hierarchy.) You can specify multiple foreign key columns.
 /// * `#[nanosql(index(unique, desc, where = "predicate"))]`: adds an explicit
 ///   index on this column with the specified ordering direction. If direction
-///   is omitted, it defaults to `asc`ending. If `where` is included, a partial
-///   index will be created with the corresponding predicate (bool) expression.
+///   is omitted, it defaults to `asc`ending.
+///
+///   If a `where` clause is included, a partial index will be created with
+///   the corresponding predicate (bool) expression.
+///   The derive macro will ensure that the predicate is syntactically valid.
+///
 ///   If `unique` is given, the values _in the index_ have to be all distinct.
-///   (For a partial index, this is _not_ the same as the column having unique
-///   values, too!)
+///   (NOTE: for a partial index, this is _not_ the same as the column having
+///   unique values!)
 pub trait Table {
     /// The parameter set used for performing `INSERT` queries.
     /// This is often just `Self`, but it may be a differen type,

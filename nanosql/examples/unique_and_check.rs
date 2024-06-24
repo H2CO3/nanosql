@@ -3,7 +3,7 @@ use nanosql::{Error, Result, Connection, ConnectionExt, Param, Table};
 
 #[derive(Clone, Debug, Param, Table)]
 #[nanosql(unique = ["city", street_name, "building_no"])]
-#[nanosql(check = "floor BETWEEN -10 AND 100", check = "building_no < 1000")]
+#[nanosql(check = r#""floor" BETWEEN -10 AND 100"#, check = "building_no < 1000")]
 pub struct Address {
     country: String,
     city: String,
