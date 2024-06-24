@@ -21,6 +21,11 @@ not-nan = ["dep:ordered-float"]
 pretty-eqp = ["dep:ptree"]
 
 [[example]]
+name = "realistic"
+test = true
+harness = false
+
+[[example]]
 name = "derive"
 test = true
 harness = false

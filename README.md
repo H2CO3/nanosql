@@ -196,7 +196,7 @@ fn main() -> Result<()> {
 ```
 
 See the [`nanosql/examples`](https://github.com/H2CO3/nanosql/tree/master/nanosql/examples)
-directory for more advanced and interesting examples.
+directory (and especially `realistic.rs`) for more advanced and interesting examples.
 
 ## A note about batch insertion and transactions
 
