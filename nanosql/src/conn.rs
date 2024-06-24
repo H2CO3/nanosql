@@ -145,15 +145,11 @@ impl ConnectionExt for Connection {
     }
 
     fn apply_recommended_settings(&mut self) -> Result<()> {
-        let txn = self.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        txn.pragma_update(None, "foreign_keys", true)?;
-        txn.pragma_update(None, "journal_mode", "WAL")?;
-        txn.pragma_update(None, "optimize", 0x10002)?;
-        txn.set_prepared_statement_cache_capacity(1024);
-        txn.commit()?;
-
-        // the safety level MUST be changed OUTSIDE any transaction
+        self.pragma_update(None, "journal_mode", "WAL")?;
         self.pragma_update(None, "synchronous", "NORMAL")?;
+        self.pragma_update(None, "foreign_keys", 1)?;
+        self.pragma_update(None, "optimize", 0x10002)?;
+        self.set_prepared_statement_cache_capacity(1024);
 
         Ok(())
     }

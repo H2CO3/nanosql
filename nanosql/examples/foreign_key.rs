@@ -1,4 +1,4 @@
-use nanosql::{Result, Query, Connection, ConnectionExt};
+use nanosql::{Result, Query, Connection, ConnectionExt, TransactionExt};
 use nanosql::{Param, ResultRecord, Table, table::{CreateTable, TableConstraint}};
 
 
@@ -135,6 +135,59 @@ fn main() -> Result<()> {
             )
         );
     }
+
+    test_runtime_enforcement_of_fk()
+}
+
+/// Actually test that the FOREIGN KEY constraints are actually enforced
+/// at runtime, with the default "recommended" config set by the library.
+///
+/// This also ensures that FKs are `DEFERRABLE INITIALLY DEFERRED`, by
+/// inserting entities in the "wrong" order (which should succeed, if
+/// the overall state of the database remains consistent upon commit).
+fn test_runtime_enforcement_of_fk() -> Result<()> {
+    let mut conn = Connection::connect_in_memory()?;
+
+    conn.create_table::<Employee>()?;
+    conn.create_table::<Department>()?;
+    conn.create_table::<BogusTable>()?;
+
+    // outside a multi-table transaction: we attempted to commit a transaction
+    // with the final state of the database violating a FOREIGN KEY constraint
+    let employee = Employee {
+        employee_id: 42,
+        full_name: "Jane Doe".into(),
+        boss_employee_id: None,
+        employing_department_id: 13,
+        some_fk_1: 37,
+        some_fk_2: true,
+    };
+
+    let error = conn.insert_batch([employee.clone()]).unwrap_err();
+    let err_msg = error.to_string();
+    assert!(err_msg.contains("FOREIGN KEY"));
+
+    // if we open a single transaction for inserting into all relevant tables,
+    // and the final state of the database remains consistent, then the exact
+    // order of insertions should not matter, even if they temporarily violate
+    // some FOREIGN KEY constraints.
+    let txn = conn.transaction()?;
+
+    txn.insert_batch([employee])?;
+    txn.insert_batch([
+        BogusTable {
+            some_col: true,
+            other_col: 37,
+        },
+    ])?;
+    txn.insert_batch([
+        Department {
+            department_id: 13,
+            title: "Department of Redundancy Department".into(),
+            established_year: 1984,
+        },
+    ])?;
+    txn.commit()?;
 
     Ok(())
 }
