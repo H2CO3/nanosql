@@ -731,14 +731,41 @@ pub enum IdentOrStr {
     Str(LitStr),
 }
 
+impl IdentOrStr {
+    fn validate_ident(ident: &str, span: Span) -> Result<(), Error> {
+        let mut chars = ident.chars();
+        let Some(first) = chars.next() else {
+            return Err(Error::new(span, "identifier must not be empty"));
+        };
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return Err(
+                Error::new(span, format_args!("invalid leading character `{first}` in identifier"))
+            );
+        }
+        if let Some(bad) = chars.find(|&c| !c.is_ascii_alphanumeric() && c != '_') {
+            return Err(
+                Error::new(span, format_args!("invalid character `{bad}` in identifier"))
+            );
+        }
+        Ok(())
+    }
+}
+
 impl Parse for IdentOrStr {
     fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
         let lookahead = stream.lookahead1();
 
         if lookahead.peek(Ident::peek_any) {
-            Ident::parse_any(stream).map(|ident| IdentOrStr::Ident(ident.unraw()))
+            Ident::parse_any(stream).and_then(|ident| {
+                let ident = ident.unraw();
+                Self::validate_ident(&ident.to_string(), ident.span())?;
+                Ok(IdentOrStr::Ident(ident))
+            })
         } else if lookahead.peek(LitStr) {
-            stream.parse::<LitStr>().map(IdentOrStr::Str)
+            stream.parse::<LitStr>().and_then(|lit| {
+                Self::validate_ident(&lit.value(), lit.span())?;
+                Ok(IdentOrStr::Str(lit))
+            })
         } else {
             Err(lookahead.error())
         }

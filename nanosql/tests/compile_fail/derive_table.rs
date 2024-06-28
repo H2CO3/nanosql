@@ -108,8 +108,8 @@ struct DuplicateFkExternalColumn {
 
 /// Referencing columns of a table-level foreign key must respect renaming attributes.
 #[derive(Clone, Default, Debug, Param, Table)]
-#[nanosql(fk("other_table" => ("MY-COL" = extern_col, "foo_bar" = "other_column")))]
-#[nanosql(rename_all = "UPPER-KEBAB-CASE")]
+#[nanosql(fk("other_table" => ("MY_COL" = extern_col, "foo_bar" = "other_column")))]
+#[nanosql(rename_all = "UPPER_SNAKE_CASE")]
 //~^^ ERROR unknown column `foo_bar` in foreign key
 struct RenamedFk {
     my_col: usize,
