@@ -16,21 +16,21 @@ struct Table1 {
 #[derive(Clone, Debug, Param, Table)]
 struct Table2 {
     #[nanosql(default = "trailing junk")]
-    //~^ ERROR Expected EOF
+    //~^ ERROR Expected: EOF
     defaulted_column: u32,
 }
 
 #[derive(Clone, Debug, Param, Table)]
 struct Table3 {
     #[nanosql(generated(virtual = "3 +"))]
-    //~^ ERROR Expected an expression
+    //~^ ERROR Expected: an expression
     generated_column_1: i32,
 }
 
 #[derive(Clone, Debug, Param, Table)]
 struct Table4 {
     #[nanosql(generated(stored = ""))]
-    //~^ ERROR Expected an expression
+    //~^ ERROR Expected: an expression
     another_gen_col: u64,
 }
 
@@ -43,7 +43,7 @@ struct Table5 {
 
 #[derive(Clone, Debug, Param, Table)]
 #[nanosql(index(unique, columns(unique_id), where = "unique_id BETWEEN 10"))]
-//~^ ERROR Expected AND
+//~^ ERROR Expected: AND
 struct Table6 {
     unique_id: i64,
 }

@@ -4,6 +4,7 @@
 //! It features primary and foreign keys, recursive queries over a hierarchy,
 //! `enum`s, and other interesting problems that you may encounter in real data.
 
+use std::io;
 use nanosql::{define_query, Result, Connection, ConnectionExt};
 use nanosql::{AsSqlTy, ToSql, FromSql, Table, Param, ResultRecord, InsertInput};
 
@@ -217,7 +218,13 @@ fn fill_db(conn: &mut Connection) -> Result<()> {
 
 fn main() -> Result<()> {
     let db_path = "/tmp/nanosql-example-taxdb.sqlite3";
-    std::fs::remove_file(db_path)?;
+
+    match std::fs::remove_file(db_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+
     let mut conn = Connection::connect(db_path)?;
 
     conn.create_table::<Taxon>()?;

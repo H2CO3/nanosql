@@ -30,10 +30,6 @@ pub enum Error {
     #[error("SQL conversion error: {0}")]
     FromSql(#[from] FromSqlError),
 
-    #[cfg(feature = "not-nan")]
-    #[error(transparent)]
-    Nan(#[from] FloatIsNan),
-
     #[error("query expects {expected} parameters but {actual} were bound")]
     ParamCountMismatch {
         expected: usize,
@@ -81,6 +77,13 @@ impl Error {
     /// Creates an `UnknownParam` error from a dynamic parameter name.
     pub fn unknown_param_dyn<T: Display>(message: T) -> Self {
         Error::UnknownParam(Cow::Owned(message.to_string()))
+    }
+}
+
+#[cfg(feature = "not-nan")]
+impl From<FloatIsNan> for Error {
+    fn from(error: FloatIsNan) -> Self {
+        Error::other(error)
     }
 }
 
