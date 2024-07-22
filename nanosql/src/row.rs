@@ -19,7 +19,7 @@ use core::borrow::{Borrow, BorrowMut};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::collections::{VecDeque, BinaryHeap, HashSet, HashMap, BTreeSet, BTreeMap};
-use rusqlite::{Statement, Row, Rows, types::{Value, ToSqlOutput, FromSql}};
+use rusqlite::{Statement, Row, Rows, types::{Value, ValueRef, ToSqlOutput, FromSql}};
 #[cfg(feature = "not-nan")]
 use ordered_float::NotNan;
 use crate::error::{Error, Result, RowCount};
@@ -126,10 +126,15 @@ impl<T: ResultRecord> ResultSet for Option<T> {
             return Ok(None);
         };
 
-        let value = T::from_row(row)?;
+        // special case for primitives: allow a single NULL row/column to be interpreted as `None`
+        let value = if row.as_ref().column_count() == 1 && row.get_ref(0)? == ValueRef::Null {
+            None
+        } else {
+            Some(T::from_row(row)?)
+        };
 
         if rows.next()?.is_none() {
-            Ok(Some(value))
+            Ok(value)
         } else {
             Err(Error::RowCountMismatch {
                 expected: RowCount::at_most(1),

@@ -26,6 +26,16 @@ define_query!{
     BTreeSetQueryWithLimit<'p>: usize => BTreeSet<u32> {
         "SELECT energy FROM fruit ORDER BY name LIMIT ?"
     }
+    OptionalPrimitiveFromNull<'p>: &'p str => Option<u32> {
+        "
+        SELECT fruit_2.energy
+        FROM fruit AS fruit_1
+        LEFT JOIN fruit AS fruit_2
+        ON fruit_2.name = fruit_1.name AND fruit_2.name = ?
+        ORDER BY fruit_1.name
+        LIMIT 1
+        "
+    }
 }
 
 fn setup() -> Result<Connection> {
@@ -189,6 +199,17 @@ fn result_record_btreeset() -> Result<()> {
     let mut stmt = conn.compile(BTreeSetQueryWithLimit)?;
 
     assert_eq!(stmt.invoke(4)?, BTreeSet::from_iter([45, 89, 95, 160]));
+
+    Ok(())
+}
+
+#[test]
+fn result_record_optional_primitive() -> Result<()> {
+    let conn = setup()?;
+    let mut stmt = conn.compile(OptionalPrimitiveFromNull)?;
+
+    assert_eq!(stmt.invoke("apple")?, Some(95));
+    assert_eq!(stmt.invoke("aaaaa")?, None);
 
     Ok(())
 }
