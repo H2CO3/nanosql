@@ -246,6 +246,109 @@ where
     }
 }
 
+/// The `ResultSet` impl for mapping types can be used when the returned rows
+/// have exactly 2 columns: the first column will be used as the key, and the
+/// second column will be used as the value. Thus, the map will have as many
+/// entries as there are rows in the result set (assuming all keys are unique).
+///
+/// Note that this is different from the [`ResultRecord`] impl on mappings,
+/// which maps column _names_ to column values and works for arbitrarily many
+/// columns (but only represents a single row). See the documentation of that
+/// trait for a more detailed explanation.
+///
+/// ```
+/// # use std::collections::HashMap;
+/// # use nanosql::{define_query, Result, Connection, ConnectionExt, ResultSet};
+/// define_query! {
+///     KeysAndValues<'p>: () => HashMap<String, i64> {
+///         "VALUES ('answer', 42), ('inv_alpha', 137)"
+///     }
+/// }
+///
+/// # fn main() -> Result<()> {
+/// let conn = Connection::connect_in_memory()?;
+/// let mut query = conn.compile(KeysAndValues)?;
+/// let map = query.invoke(())?;
+///
+/// assert_eq!(
+///     map,
+///     HashMap::from([
+///         ("inv_alpha".into(), 137), // order intentionally reversed
+///         ("answer".into(), 42),
+///     ])
+/// );
+/// # Ok(())
+/// # }
+/// ```
+impl<K, V> ResultSet for HashMap<K, V>
+where
+    K: Eq + Hash + FromSql,
+    V: FromSql,
+{
+    fn from_rows(mut rows: Rows<'_>) -> Result<Self> {
+        let mut result_set = HashMap::new();
+
+        while let Some(row) = rows.next()? {
+            let (key, value) = <(K, V)>::from_row(row)?;
+            result_set.insert(key, value);
+        }
+
+        Ok(result_set)
+    }
+}
+
+/// The `ResultSet` impl for mapping types can be used when the returned rows
+/// have exactly 2 columns: the first column will be used as the key, and the
+/// second column will be used as the value. Thus, the map will have as many
+/// entries as there are rows in the result set (assuming all keys are unique).
+///
+/// Note that this is different from the [`ResultRecord`] impl on mappings,
+/// which maps column _names_ to column values and works for arbitrarily many
+/// columns (but only represents a single row). See the documentation of that
+/// trait for a more detailed explanation.
+///
+/// ```
+/// # use std::collections::BTreeMap;
+/// # use std::rc::Rc;
+/// # use nanosql::{define_query, Result, Connection, ConnectionExt, ResultSet};
+/// define_query! {
+///     KeysAndValues<'p>: () => BTreeMap<Rc<str>, Option<f32>> {
+///         "VALUES ('days_per_year', 365.2425), ('missing', NULL)"
+///     }
+/// }
+///
+/// # fn main() -> Result<()> {
+/// let conn = Connection::connect_in_memory()?;
+/// let mut query = conn.compile(KeysAndValues)?;
+/// let map = query.invoke(())?;
+///
+/// assert_eq!(
+///     map,
+///     BTreeMap::from([
+///         ("missing".into(), None), // order intentionally reversed
+///         ("days_per_year".into(), Some(365.2425)),
+///     ])
+/// );
+/// # Ok(())
+/// # }
+/// ```
+impl<K, V> ResultSet for BTreeMap<K, V>
+where
+    K: Ord + FromSql,
+    V: FromSql,
+{
+    fn from_rows(mut rows: Rows<'_>) -> Result<Self> {
+        let mut result_set = BTreeMap::new();
+
+        while let Some(row) = rows.next()? {
+            let (key, value) = <(K, V)>::from_row(row)?;
+            result_set.insert(key, value);
+        }
+
+        Ok(result_set)
+    }
+}
+
 /// This trait describes types that deserialize from a single row (tuple).
 ///
 /// When derived on a `struct`, the `rename_all` (type-level) and `rename`
@@ -426,6 +529,52 @@ impl ResultRecord for NotNan<f64> {
     }
 }
 
+/// The `ResultRecord` impl for maps represents an arbitrary row as column
+/// names mapped to the corresponding column values. It works for however
+/// many columns; the `.len()` of the map will be the number of columns in
+/// the returned rows.
+///
+/// Note that this is not the same as the [`ResultSet`] impl for maps, which
+/// maps keys in the first column to values in the second column, and thus
+/// only works for queries returning exactly two-columns. See its documentation
+/// for a more detailed explanation.
+///
+/// ```
+/// # use std::collections::HashMap;
+/// # use nanosql::{define_query, Connection, ConnectionExt, Result};
+/// use nanosql::Value;
+///
+/// define_query! {
+///     OneRowManyColumns<'p>: () => Vec<HashMap<String, Value>> {
+///         r#"
+///         WITH t("qux", "baz", "mem") AS (
+///             VALUES ('some string', 999, NULL)
+///         )
+///         SELECT
+///             "qux" AS "qux",
+///             "baz" AS "baz",
+///             "mem" AS "mem"
+///         FROM t;
+///         "#
+///     }
+/// }
+/// # fn main() -> Result<()> {
+/// let conn = Connection::connect_in_memory()?;
+/// let mut query = conn.compile(OneRowManyColumns)?;
+///
+/// assert_eq!(
+///     query.invoke(())?,
+///     [
+///         HashMap::from([
+///             ("baz".into(), Value::Integer(999)),
+///             ("qux".into(), Value::Text("some string".into())),
+///             ("mem".into(), Value::Null),
+///         ])
+///     ]
+/// );
+/// # Ok(())
+/// # }
+/// ```
 impl<K, V> ResultRecord for HashMap<K, V>
 where
     K: Eq + Hash + for<'a> From<&'a str>,
@@ -447,6 +596,52 @@ where
     }
 }
 
+/// The `ResultRecord` impl for maps represents an arbitrary row as column
+/// names mapped to the corresponding column values. It works for however
+/// many columns; the `.len()` of the map will be the number of columns in
+/// the returned rows.
+///
+/// Note that this is not the same as the [`ResultSet`] impl for maps, which
+/// maps keys in the first column to values in the second column, and thus
+/// only works for queries returning exactly two-columns. See its documentation
+/// for a more detailed explanation.
+///
+/// ```
+/// # use std::collections::BTreeMap;
+/// # use nanosql::{define_query, Connection, ConnectionExt, Result};
+/// use nanosql::Value;
+///
+/// define_query! {
+///     OneRowManyColumns<'p>: () => [BTreeMap<Box<str>, Value>; 1] {
+///         r#"
+///         WITH t("qux", "baz", "mem") AS (
+///             VALUES ('some string', 987, NULL)
+///         )
+///         SELECT
+///             "qux" AS "qux",
+///             "baz" AS "baz",
+///             "mem" AS "mem"
+///         FROM t;
+///         "#
+///     }
+/// }
+/// # fn main() -> Result<()> {
+/// let conn = Connection::connect_in_memory()?;
+/// let mut query = conn.compile(OneRowManyColumns)?;
+///
+/// assert_eq!(
+///     query.invoke(())?,
+///     [
+///         BTreeMap::from([
+///             ("baz".into(), Value::Integer(987)),
+///             ("qux".into(), Value::Text("some string".into())),
+///             ("mem".into(), Value::Null),
+///         ])
+///     ]
+/// );
+/// # Ok(())
+/// # }
+/// ```
 impl<K, V> ResultRecord for BTreeMap<K, V>
 where
     K: Ord + for<'a> From<&'a str>,
