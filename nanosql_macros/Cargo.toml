@@ -1,6 +1,6 @@
 [package]
 name = "nanosql_macros"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 authors = ["Arpad Goretity 'H2CO3' <arpad.goretity@gmail.com>"]
 description = "Tiny, strongly-typed data mapper for SQLite (procedural macros)"
@@ -14,7 +14,7 @@ proc-macro = true
 
 [dependencies]
 proc-macro2 = "1.0.86"
-syn = "2.0.71"
+syn = "2.0.72"
 quote = "1.0.36"
 deluxe = "0.5.0"
 heck = "0.5.0"
