@@ -24,6 +24,8 @@ use crate::{
 };
 #[cfg(feature = "not-nan")]
 use ordered_float::NotNan;
+#[cfg(feature = "chrono")]
+use chrono::{DateTime, Utc, FixedOffset, Local};
 
 
 /// Implemented by UDTs that map to an SQL table. This is a convenience helper trait
@@ -874,6 +876,13 @@ impl_as_sql_ty_for_primitive!{
     String  => SqlTy::new(TyPrim::Text),
     [u8]    => SqlTy::new(TyPrim::Blob),
     Vec<u8> => SqlTy::new(TyPrim::Blob),
+}
+
+#[cfg(feature = "chrono")]
+impl_as_sql_ty_for_primitive!{
+    DateTime<Utc> => SqlTy::new(TyPrim::Text),
+    DateTime<FixedOffset> => SqlTy::new(TyPrim::Text),
+    DateTime<Local> => SqlTy::new(TyPrim::Text),
 }
 
 macro_rules! impl_as_sql_ty_for_non_zero {

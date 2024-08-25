@@ -22,6 +22,8 @@ use std::collections::{VecDeque, BinaryHeap, HashSet, HashMap, BTreeSet, BTreeMa
 use rusqlite::{Statement, Row, Rows, types::{Value, ValueRef, ToSqlOutput, FromSql}};
 #[cfg(feature = "not-nan")]
 use ordered_float::NotNan;
+#[cfg(feature = "chrono")]
+use chrono::{DateTime, Utc, FixedOffset, Local};
 use crate::error::{Error, Result, RowCount};
 
 
@@ -410,6 +412,13 @@ impl_result_record_for_primitive!{
     String,
     Vec<u8>,
     Value,
+}
+
+#[cfg(feature = "chrono")]
+impl_result_record_for_primitive! {
+    DateTime<Utc>,
+    DateTime<FixedOffset>,
+    DateTime<Local>,
 }
 
 macro_rules! impl_result_record_for_tuple {

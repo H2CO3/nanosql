@@ -30,5 +30,8 @@ pub use error::{Error, Result};
 #[cfg(feature = "not-nan")]
 pub use ordered_float::NotNan;
 
+#[cfg(feature = "chrono")]
+pub use chrono::{DateTime, FixedOffset, Utc};
+
 #[cfg(feature = "derive")]
 pub use nanosql_macros::{ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table, InsertInput};

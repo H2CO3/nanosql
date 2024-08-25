@@ -21,6 +21,8 @@ use std::collections::{HashMap, BTreeMap};
 use rusqlite::{Statement, ToSql, types::{Value, ValueRef, Null, ToSqlOutput}};
 #[cfg(feature = "not-nan")]
 use ordered_float::NotNan;
+#[cfg(feature = "chrono")]
+use chrono::{DateTime, Utc, FixedOffset, Local};
 use crate::error::{Error, Result};
 
 
@@ -179,6 +181,13 @@ impl_param_for_primitive!{
     Value,
     ToSqlOutput<'_>,
     Null,
+}
+
+#[cfg(feature = "chrono")]
+impl_param_for_primitive! {
+    DateTime<Utc>,
+    DateTime<FixedOffset>,
+    DateTime<Local>,
 }
 
 #[cfg(feature = "not-nan")]
