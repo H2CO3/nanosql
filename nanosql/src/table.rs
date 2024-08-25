@@ -1095,8 +1095,8 @@ impl<T: Table> Query for CreateTable<T> {
 /// See the [SQLite docs](https://www.sqlite.org/lang_insert.html) for details.
 ///
 /// ```
-/// # use nanosql::{define_query, Error};
-/// # use nanosql::{Connection, ConnectionExt, Single, Table, Param, ResultRecord, Insert};
+/// # use nanosql::{define_query, Error, Insert};
+/// # use nanosql::{Connection, ConnectionExt, Table, Param, ResultRecord, IgnoredAny, Single};
 /// # use rusqlite::Error as SqliteError;
 /// # use rusqlite::ffi::{Error as FfiError, ErrorCode};
 /// #[derive(Clone, PartialEq, Eq, Hash, Debug, Table, Param, ResultRecord)]
@@ -1115,7 +1115,9 @@ impl<T: Table> Query for CreateTable<T> {
 /// ];
 /// let mut conn = Connection::connect_in_memory()?;
 /// conn.create_table::<Food>()?;
-/// conn.insert_batch(foods.clone())?;
+///
+/// let flags = conn.insert_or_ignore_batch(foods.clone())?;
+/// assert_eq!(flags, [true, true, true]);
 ///
 /// // convenience query for retrieving the properties of the "fish" record
 /// define_query! {
@@ -1146,28 +1148,60 @@ impl<T: Table> Query for CreateTable<T> {
 ///     )))
 /// ));
 /// assert_eq!(
-///     conn.compile_invoke(GetFish, ())?.0,
-///     Food { name: "fish".into(), sugar: 0, energy: 200 },
+///     conn.compile_invoke(GetFish, ())?,
+///     Single(Food { name: "fish".into(), sugar: 0, energy: 200 }),
 /// );
 ///
 /// // IGNORE means no error, but the database is still not modified.
-/// let () = conn.compile_invoke(
+/// let flag = conn.compile_invoke(
 ///     Insert::<Food>::or_ignore(),
 ///     Food { name: "fish".into(), sugar: 14, energy: 38 },
 /// )?;
+/// assert_eq!(flag, None);
 /// assert_eq!(
-///     conn.compile_invoke(GetFish, ())?.0,
-///     Food { name: "fish".into(), sugar: 0, energy: 200 },
+///     conn.compile_invoke(GetFish, ())?,
+///     Single(Food { name: "fish".into(), sugar: 0, energy: 200 }),
 /// );
 ///
 /// // REPLACE means update the other fields of the conflicting row.
-/// let () = conn.compile_invoke(
+/// let flag = conn.compile_invoke(
 ///     Insert::<Food>::or_replace(),
 ///     Food { name: "fish".into(), sugar: 15, energy: 39 },
 /// )?;
+/// assert_eq!(flag, Some(IgnoredAny));
 /// assert_eq!(
-///     conn.compile_invoke(GetFish, ())?.0,
-///     Food { name: "fish".into(), sugar: 15, energy: 39 },
+///     conn.compile_invoke(GetFish, ())?,
+///     Single(Food { name: "fish".into(), sugar: 15, energy: 39 }),
+/// );
+///
+/// // INSERT OR IGNORE also works via a convenience extension method on `Connection`
+/// let flag = conn.insert_or_ignore_one(Food {
+///     name: "fish".into(),
+///     sugar: 16,
+///     energy: 49,
+/// })?;
+/// assert_eq!(flag, false);
+/// assert_eq!(
+///     conn.compile_invoke(GetFish, ())?,
+///     Single(Food { name: "fish".into(), sugar: 15, energy: 39 }),
+/// );
+///
+/// let flag = conn.insert_or_ignore_one(Food {
+///     name: "plum".into(),
+///     sugar: 43,
+///     energy: 129,
+/// })?;
+/// assert_eq!(flag, true);
+///
+/// // replacing also works using a convenience method on connections
+/// conn.insert_or_replace_one(Food {
+///     name: "fish".into(),
+///     sugar: 17,
+///     energy: 64,
+/// })?;
+/// assert_eq!(
+///     conn.compile_invoke(GetFish, ())?,
+///     Single(Food { name: "fish".into(), sugar: 17, energy: 64 }),
 /// );
 /// # Ok(())
 /// # }
@@ -1228,7 +1262,10 @@ impl<T: Table> Debug for Insert<T> {
 
 impl<T: Table> Query for Insert<T> {
     type Input<'p> = T::InsertInput<'p>;
-    type Output = ();
+
+    /// The optional is `Some(_)` if the row was inserted or updated, and `None`
+    /// if it was ignored.
+    type Output = Option<crate::row::IgnoredAny>;
 
     /// TODO(H2CO3): respect optional/defaulted columns
     fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
@@ -1257,7 +1294,7 @@ impl<T: Table> Query for Insert<T> {
             sep = ", ";
         }
 
-        formatter.write_str("\n);")
+        formatter.write_str("\n)\nRETURNING 1 AS 'sentinel';")
     }
 }
 
@@ -1294,10 +1331,10 @@ impl Display for ConflictResolution {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             ConflictResolution::Rollback => "ROLLBACK",
-            ConflictResolution::Abort => "ABORT",
-            ConflictResolution::Fail => "FAIL",
-            ConflictResolution::Ignore => "IGNORE",
-            ConflictResolution::Replace => "REPLACE",
+            ConflictResolution::Abort    => "ABORT",
+            ConflictResolution::Fail     => "FAIL",
+            ConflictResolution::Ignore   => "IGNORE",
+            ConflictResolution::Replace  => "REPLACE",
         })
     }
 }
@@ -1395,7 +1432,7 @@ impl<T: Table, C> Debug for Select<T, C> {
 impl<T, C> Query for Select<T, C>
 where
     T: Table + crate::row::ResultRecord,
-    C: crate::row::ResultSet + FromIterator<T>,
+    C: FromIterator<T> + crate::row::ResultSet,
 {
     type Input<'p> = ();
     type Output = C;

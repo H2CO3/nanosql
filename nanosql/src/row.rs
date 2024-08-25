@@ -520,6 +520,17 @@ impl ResultRecord for ToSqlOutput<'_> {
     }
 }
 
+/// Convenience helper for ignoring the return value of a query.
+/// This type successfully deserializes from any number of columns.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub struct IgnoredAny;
+
+impl ResultRecord for IgnoredAny {
+    fn from_row(_: &Row<'_>) -> Result<Self> {
+        Ok(IgnoredAny)
+    }
+}
+
 #[cfg(feature = "not-nan")]
 impl ResultRecord for NotNan<f32> {
     fn from_row(row: &Row<'_>) -> Result<Self> {

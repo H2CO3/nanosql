@@ -24,7 +24,7 @@ pub use table::{Table, InsertInput, TableDesc, Column, SqlTy, TyPrim, AsSqlTy, I
 pub use stmt::CompiledStatement;
 pub use conn::{ConnectionExt, TransactionExt};
 pub use param::{Param, ParamPrefix};
-pub use row::{ResultRecord, ResultSet, Single};
+pub use row::{ResultRecord, ResultSet, IgnoredAny, Single};
 pub use error::{Error, Result};
 
 #[cfg(feature = "not-nan")]

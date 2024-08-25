@@ -5,7 +5,8 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use crate::{
     query::Query,
-    table::{Table, InsertInput, CreateTable, Insert},
+    table::{Table, InsertInput, CreateTable, Select, Insert},
+    row::{ResultRecord, ResultSet},
     stmt::CompiledStatement,
     explain::{ExplainVdbeProgram, VdbeInstruction, ExplainQueryPlan, QueryPlan},
     error::Result,
@@ -99,6 +100,60 @@ pub trait ConnectionExt: Sealed {
     /// for details.
     fn create_table<T: Table>(&mut self) -> Result<()>;
 
+    /// Returns all rows of a table.
+    fn select_all<T, C>(&mut self) -> Result<C>
+    where
+        T: Table + ResultRecord,
+        C: FromIterator<T> + ResultSet,
+    {
+        self.compile_invoke(Select::<T, C>::all(), ())
+    }
+
+    /// Returns all **unique** rows of a table (`SELECT DISTINCT`).
+    ///
+    /// ```
+    /// # use nanosql::{Connection, ConnectionExt, Table, Param, ResultRecord};
+    /// #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Table, Param, ResultRecord)]
+    /// struct Point {
+    ///     x: i16,
+    ///     y: i16,
+    /// }
+    ///
+    /// # fn main() -> nanosql::Result<()> {
+    /// let mut conn = Connection::connect_in_memory()?;
+    /// conn.create_table::<Point>()?;
+    ///
+    /// let mut orig_points = [
+    ///     Point { x:  1, y: 2 },
+    ///     Point { x:  0, y: 3 },
+    ///     Point { x:  1, y: 2 }, // duplicate
+    ///     Point { x: -9, y: 4 },
+    /// ];
+    /// conn.insert_batch(orig_points)?;
+    ///
+    /// let mut queried_points: Vec<Point> = conn.select_all()?;
+    ///
+    /// orig_points.sort_unstable();
+    /// queried_points.sort_unstable();
+    /// assert_eq!(queried_points, orig_points);
+    ///
+    /// let mut unique_orig_points: Vec<_> = orig_points.to_vec();
+    /// unique_orig_points.dedup();
+    ///
+    /// let mut unique_queried_points: Vec<Point> = conn.select_distinct()?;
+    /// unique_queried_points.sort_unstable();
+    /// assert_eq!(unique_queried_points, unique_orig_points);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn select_distinct<T, C>(&mut self) -> Result<C>
+    where
+        T: Table + ResultRecord,
+        C: FromIterator<T> + ResultSet,
+    {
+        self.compile_invoke(Select::<T, C>::distinct(), ())
+    }
+
     /// Convenience method for inserting many rows into a table in one go.
     ///
     /// It opens a single transaction for all of the insert statements, which
@@ -112,6 +167,89 @@ pub trait ConnectionExt: Sealed {
     where
         I: IntoIterator,
         I::Item: InsertInput<'p>;
+
+    /// Convenience method for inserting many rows into a table in one go,
+    /// ignoring rows that already exist (based on `PRIMARY KEY` and `UNIQUE`
+    /// columns).
+    ///
+    /// It opens a single transaction for all of the insert statements, which
+    /// prevents others from observing the data in a partially-inserted state.
+    ///
+    /// It prepares an `INSERT` statement and calls it in a loop, so it's more
+    /// efficient than re-preparing and executing the same statement in a loop.
+    ///
+    /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
+    fn insert_or_ignore_batch<'p, I>(&mut self, entities: I) -> Result<Vec<bool>>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>;
+
+    /// Convenience method for inserting many rows into a table in one go,
+    /// replacing rows that already exist (based on `PRIMARY KEY` and `UNIQUE`
+    /// columns).
+    ///
+    /// It opens a single transaction for all of the insert statements, which
+    /// prevents others from observing the data in a partially-inserted state.
+    ///
+    /// It prepares an `INSERT` statement and calls it in a loop, so it's more
+    /// efficient than re-preparing and executing the same statement in a loop.
+    ///
+    /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
+    fn insert_or_replace_batch<'p, I>(&mut self, entities: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>;
+
+    /// Inserts a single row into a table.
+    ///
+    /// If you are planning to insert multiple rows, consider using
+    /// [`ConnectionExt::insert_batch()`] instead, **both** for
+    /// correctness (transactional atomicity) **and** improved efficiency.
+    /// In other words, do **NOT** call this function in a loop.
+    fn insert_one<'p, T>(&mut self, entity: T) -> Result<()>
+    where
+        T: InsertInput<'p>
+    {
+        self.compile_invoke(Insert::<T::Table>::new(), entity)
+            .map(drop)
+    }
+
+    /// Inserts a single row into a table if it does not yet exist.
+    /// Returns `true` if a new row was inserted, and `false` if it
+    /// wasn't inserted because a conflicting row already existed.
+    /// Uniqueness or "existence" is determined based on `UNIQUE`
+    /// and `PRIMARY KEY` fields only.
+    ///
+    /// If you are planning to insert multiple rows, consider using
+    /// [`ConnectionExt::insert_or_ignore_batch()`] instead, **both**
+    /// for correctness (transactional atomicity) **and** improved
+    /// efficiency. In other words, do **NOT** call this in a loop.
+    ///
+    /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
+    fn insert_or_ignore_one<'p, T>(&mut self, entity: T) -> Result<bool>
+    where
+        T: InsertInput<'p>
+    {
+        self.compile_invoke(Insert::<T::Table>::or_ignore(), entity)
+            .map(|row| row.is_some())
+    }
+
+    /// Inserts a single row into a table if it does not yet exist,
+    /// or replaces the non-PK and non-`UNIQUE` columns on conflict.
+    ///
+    /// If you are planning to insert multiple rows, consider using
+    /// [`ConnectionExt::insert_or_replace_batch()`] instead, **both**
+    /// for correctness (transactional atomicity) **and** improved
+    /// efficiency. In other words, do **NOT** call this in a loop.
+    ///
+    /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
+    fn insert_or_replace_one<'p, T>(&mut self, entity: T) -> Result<()>
+    where
+        T: InsertInput<'p>
+    {
+        self.compile_invoke(Insert::<T::Table>::or_replace(), entity)
+            .map(drop)
+    }
 
     /// Explains the VDBE bytecode program generated for a query/statement.
     ///
@@ -177,6 +315,28 @@ impl ConnectionExt for Connection {
         txn.commit()?;
         Ok(())
     }
+
+    fn insert_or_ignore_batch<'p, I>(&mut self, entities: I) -> Result<Vec<bool>>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>
+    {
+        let txn = self.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let flags = txn.insert_or_ignore_batch(entities)?;
+        txn.commit()?;
+        Ok(flags)
+    }
+
+    fn insert_or_replace_batch<'p, I>(&mut self, entities: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>,
+    {
+        let txn = self.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        txn.insert_or_replace_batch(entities)?;
+        txn.commit()?;
+        Ok(())
+    }
 }
 
 /// This extension trait defines convenience methods on [`Transaction`].
@@ -195,9 +355,47 @@ pub trait TransactionExt: Sealed {
         I: IntoIterator,
         I::Item: InsertInput<'p>;
 
+    /// Convenience method for inserting many rows into a table in one go,
+    /// skipping those that already exist (based on `PRIMARY KEY` and `UNIQUE`
+    /// columns), instead of returning an error when duplicates are found.
+    ///
+    /// This is an escape hatch for when you can't borrow the [`Connection`]
+    /// mutably. It is recommended to use [`ConnectionExt::insert_or_ignore_batch()`]
+    /// by default, unless you can't provide unique access to the [`Connection`].
+    ///
+    /// For each row, a `bool` flag will be returned, indicating whether the
+    /// insertion actually happened (`true`) or the row already existed in the
+    /// database, therefore the insertion was skipped (`false`).
+    ///
+    /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
+    fn insert_or_ignore_batch<'p, I>(&self, entities: I) -> Result<Vec<bool>>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>;
+
+    /// Convenience method for inserting many rows into a table in one go,
+    /// _replacing_ those that already exist (based on `PRIMARY KEY` and `UNIQUE`
+    /// columns), instead of returning an error when duplicates are found.
+    ///
+    /// This is an escape hatch for when you can't borrow the [`Connection`]
+    /// mutably. It is recommended to use [`ConnectionExt::insert_or_replace_batch()`]
+    /// by default, unless you can't provide unique access to the [`Connection`].
+    ///
+    /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
+    fn insert_or_replace_batch<'p, I>(&self, entities: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>;
+
     /// Convenience method for invoking a query many times in one go, correctly
     /// (without the DB being modified across iterations), and efficiently
     /// (without re-compiling the query object and within a single transaction).
+    ///
+    /// **Note:** unlike the other methods, you have to **drive the returned
+    /// iterator to completion** by yourself if you want to ensure that the query
+    /// is actually invoked with each set of parameters (i.e., each iteration).
+    /// If you simply call this without exhausting the iterator, some or all of
+    /// the parameters/queries may be ignored, potentially leading to data loss.
     fn invoke_batch<'p, Q, I>(
         &self,
         query: Q,
@@ -215,8 +413,33 @@ impl TransactionExt for Transaction<'_> {
         I: IntoIterator,
         I::Item: InsertInput<'p>,
     {
-        let query = Insert::<<I::Item as InsertInput<'p>>::Table>::default();
-        self.invoke_batch(query, entities)?.collect()
+        let query = Insert::<<I::Item as InsertInput<'p>>::Table>::new();
+
+        self.invoke_batch(query, entities)?
+            .try_for_each(|row| row.map(drop))
+    }
+
+    fn insert_or_ignore_batch<'p, I>(&self, entities: I) -> Result<Vec<bool>>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>
+    {
+        let query = Insert::<<I::Item as InsertInput<'p>>::Table>::or_ignore();
+
+        self.invoke_batch(query, entities)?
+            .map(|row| row.map(|opt| opt.is_some()))
+            .collect()
+    }
+
+    fn insert_or_replace_batch<'p, I>(&self, entities: I) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: InsertInput<'p>
+    {
+        let query = Insert::<<I::Item as InsertInput<'p>>::Table>::or_replace();
+
+        self.invoke_batch(query, entities)?
+            .try_for_each(|row| row.map(drop))
     }
 
     fn invoke_batch<'p, Q, I>(
