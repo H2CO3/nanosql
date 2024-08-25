@@ -101,7 +101,7 @@ pub trait ConnectionExt: Sealed {
     fn create_table<T: Table>(&mut self) -> Result<()>;
 
     /// Returns all rows of a table.
-    fn select_all<T, C>(&mut self) -> Result<C>
+    fn select_all<T, C>(&self) -> Result<C>
     where
         T: Table + ResultRecord,
         C: FromIterator<T> + ResultSet,
@@ -146,7 +146,7 @@ pub trait ConnectionExt: Sealed {
     /// # Ok(())
     /// # }
     /// ```
-    fn select_distinct<T, C>(&mut self) -> Result<C>
+    fn select_distinct<T, C>(&self) -> Result<C>
     where
         T: Table + ResultRecord,
         C: FromIterator<T> + ResultSet,
@@ -206,7 +206,7 @@ pub trait ConnectionExt: Sealed {
     /// [`ConnectionExt::insert_batch()`] instead, **both** for
     /// correctness (transactional atomicity) **and** improved efficiency.
     /// In other words, do **NOT** call this function in a loop.
-    fn insert_one<'p, T>(&mut self, entity: T) -> Result<()>
+    fn insert_one<'p, T>(&self, entity: T) -> Result<()>
     where
         T: InsertInput<'p>
     {
@@ -226,7 +226,7 @@ pub trait ConnectionExt: Sealed {
     /// efficiency. In other words, do **NOT** call this in a loop.
     ///
     /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
-    fn insert_or_ignore_one<'p, T>(&mut self, entity: T) -> Result<bool>
+    fn insert_or_ignore_one<'p, T>(&self, entity: T) -> Result<bool>
     where
         T: InsertInput<'p>
     {
@@ -243,7 +243,7 @@ pub trait ConnectionExt: Sealed {
     /// efficiency. In other words, do **NOT** call this in a loop.
     ///
     /// See the [SQLite docs](https://sqlite.org/lang_conflict.html) for details.
-    fn insert_or_replace_one<'p, T>(&mut self, entity: T) -> Result<()>
+    fn insert_or_replace_one<'p, T>(&self, entity: T) -> Result<()>
     where
         T: InsertInput<'p>
     {
