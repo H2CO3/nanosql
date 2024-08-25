@@ -15,6 +15,10 @@ use crate::{
 
 /// This extension trait defines methods on [`Connection`] that help you create
 /// and manage strongly-typed prepared statements.
+///
+/// Consult the [C API Reference](https://www.sqlite.org/c3ref/intro.html) for
+/// in-depth explanation of the concepts such as prepared statements, parameter
+/// binding, and stepping prepared VDBE programs.
 #[allow(private_bounds)]
 pub trait ConnectionExt: Sealed {
     /// Compiles a [`Query`] into a "prepared" [`CompiledStatement`].
@@ -90,6 +94,9 @@ pub trait ConnectionExt: Sealed {
     ///
     /// Runs `PRAGMA optimize` in the default (limited-resource) mode
     /// after creating the table and indexes, to help query planning.
+    ///
+    /// See the [SQLite docs](https://www.sqlite.org/lang_createtable.html)
+    /// for details.
     fn create_table<T: Table>(&mut self) -> Result<()>;
 
     /// Convenience method for inserting many rows into a table in one go.
@@ -99,17 +106,23 @@ pub trait ConnectionExt: Sealed {
     ///
     /// It prepares an `INSERT` statement and calls it in a loop, so it's more
     /// efficient than re-preparing and executing the same statement in a loop.
+    ///
+    /// See the [SQLite docs](https://www.sqlite.org/lang_insert.html) for details.
     fn insert_batch<'p, I>(&mut self, entities: I) -> Result<()>
     where
         I: IntoIterator,
         I::Item: InsertInput<'p>;
 
     /// Explains the VDBE bytecode program generated for a query/statement.
+    ///
+    /// See the [SQLite docs](https://www.sqlite.org/lang_explain.html) for details.
     fn explain_vdbe_program<Q: Query>(&self, query: Q) -> Result<Vec<VdbeInstruction>> {
         self.compile_invoke(ExplainVdbeProgram::from(query), ())
     }
 
     /// Explains the high-level query plan generated for a query/statement.
+    ///
+    /// See the [SQLite docs](https://www.sqlite.org/eqp.html) for details.
     fn explain_query_plan<Q: Query>(&self, query: Q) -> Result<QueryPlan> {
         self.compile_invoke(ExplainQueryPlan::from(query), ())
     }
@@ -167,6 +180,9 @@ impl ConnectionExt for Connection {
 }
 
 /// This extension trait defines convenience methods on [`Transaction`].
+///
+/// See the [SQLite docs](https://www.sqlite.org/transactional.html) for
+/// an overview of the transactionality guarantees of SQLite.
 #[allow(private_bounds)]
 pub trait TransactionExt: Sealed {
     /// Convenience method for inserting many rows into a table in one go.

@@ -1,4 +1,7 @@
 //! Strongly-typed queries.
+//!
+//! Consult the official [SQLite documentation](https://www.sqlite.org/lang.html) on the
+//! supported queries for an in-depth explanation of the precise SQL understood by SQLite.
 
 use core::fmt::{self, Display, Formatter};
 use crate::param::Param;
@@ -7,6 +10,9 @@ use crate::row::ResultSet;
 
 /// Describes the input (parameter) and output (relation/row/tuple)
 /// types of a query, as well as its actual SQL source text.
+///
+/// Consult the official [SQLite documentation](https://www.sqlite.org/lang.html) on the
+/// supported queries for an in-depth explanation of the precise SQL understood by SQLite.
 pub trait Query {
     /// The parameter type of the query. This must be either of the following:
     ///

@@ -5,6 +5,8 @@ parameters and a typed result set. It does **not** attempt to typecheck your SQL
 Rather, it only ensures that the parameters and results serialize/deserialize to/from
 the correct shape.
 
+For an overview of SQLite, [see the official docs](https://www.sqlite.org/).
+
 ## Overview
 
 The library is structured around prepared statements. First, you create a description

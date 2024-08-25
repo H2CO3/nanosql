@@ -125,9 +125,12 @@ use chrono::{DateTime, Utc, FixedOffset, Local};
 ///   If `unique` is given, the values _in the index_ have to be all distinct.
 ///   (NOTE: for a partial index, this is _not_ the same as the column having
 ///   unique values!)
+///
+/// See the [SQLite docs](https://www.sqlite.org/lang_createtable.html) for
+/// more details on creating tables, columns, and typing.
 pub trait Table {
     /// The parameter set used for performing `INSERT` queries.
-    /// This is often just `Self`, but it may be a differen type,
+    /// This is often just `Self`, but it may be a different type,
     /// e.g. when the table contains optional columns (of a nullable
     /// type or with a `DEFAULT` value), and/or generated columns.
     type InsertInput<'p>: InsertInput<'p, Table = Self>;
@@ -174,6 +177,8 @@ where
 ///   of the trait in the impl. It defaults to `'p` (for parameters). This is
 ///   **not** added to the list of generic arguments, so it should be an already
 ///   existing generic lifetime parameter of the input type itself.
+///
+/// See the [SQLite docs](https://www.sqlite.org/lang_insert.html) for details.
 pub trait InsertInput<'p>: Param {
     /// The table that uses this parameter set as its primary insertion input.
     type Table: Table<InsertInput<'p> = Self>;
@@ -1086,7 +1091,117 @@ impl<T: Table> Query for CreateTable<T> {
 }
 
 /// An `INSERT` statement for adding rows to a table.
-pub struct Insert<T>(PhantomData<fn() -> T>);
+///
+/// See the [SQLite docs](https://www.sqlite.org/lang_insert.html) for details.
+///
+/// ```
+/// # use nanosql::{define_query, Error};
+/// # use nanosql::{Connection, ConnectionExt, Single, Table, Param, ResultRecord, Insert};
+/// # use rusqlite::Error as SqliteError;
+/// # use rusqlite::ffi::{Error as FfiError, ErrorCode};
+/// #[derive(Clone, PartialEq, Eq, Hash, Debug, Table, Param, ResultRecord)]
+/// struct Food {
+///     #[nanosql(unique)]
+///     name: String,
+///     sugar: u16,
+///     energy: u32,
+/// }
+///
+/// # fn main() -> nanosql::Result<()> {
+/// let foods = [
+///     Food { name: "beef".into(), sugar: 0, energy: 250 },
+///     Food { name: "fish".into(), sugar: 0, energy: 200 },
+///     Food { name: "chocolate".into(), sugar: 61, energy: 545 },
+/// ];
+/// let mut conn = Connection::connect_in_memory()?;
+/// conn.create_table::<Food>()?;
+/// conn.insert_batch(foods.clone())?;
+///
+/// // convenience query for retrieving the properties of the "fish" record
+/// define_query! {
+///     GetFish<'lt>: () => Single<Food> {
+///         r#"
+///         SELECT name AS name, sugar AS sugar, energy AS energy
+///         FROM food
+///         WHERE name = 'fish'
+///         "#
+///     }
+/// }
+/// // Try to insert a duplicate using various conflict resolution algorithms,
+/// // applicable when PRIMARY KEY or UNIQUE constraints are violated.
+///
+/// // The default is ABORT: duplicates cause an error, the DB is not modified.
+/// let result = conn.compile_invoke(
+///     Insert::<Food>::new(),
+///     Food { name: "fish".into(), sugar: 13, energy: 37 },
+/// );
+/// assert!(matches!(
+///     result,
+///     Err(Error::Sqlite(SqliteError::SqliteFailure(
+///         FfiError {
+///             code: ErrorCode::ConstraintViolation,
+///             ..
+///         },
+///         _
+///     )))
+/// ));
+/// assert_eq!(
+///     conn.compile_invoke(GetFish, ())?.0,
+///     Food { name: "fish".into(), sugar: 0, energy: 200 },
+/// );
+///
+/// // IGNORE means no error, but the database is still not modified.
+/// let () = conn.compile_invoke(
+///     Insert::<Food>::or_ignore(),
+///     Food { name: "fish".into(), sugar: 14, energy: 38 },
+/// )?;
+/// assert_eq!(
+///     conn.compile_invoke(GetFish, ())?.0,
+///     Food { name: "fish".into(), sugar: 0, energy: 200 },
+/// );
+///
+/// // REPLACE means update the other fields of the conflicting row.
+/// let () = conn.compile_invoke(
+///     Insert::<Food>::or_replace(),
+///     Food { name: "fish".into(), sugar: 15, energy: 39 },
+/// )?;
+/// assert_eq!(
+///     conn.compile_invoke(GetFish, ())?.0,
+///     Food { name: "fish".into(), sugar: 15, energy: 39 },
+/// );
+/// # Ok(())
+/// # }
+/// ```
+pub struct Insert<T> {
+    behavior: ConflictResolution,
+    marker: PhantomData<fn() -> T>,
+}
+
+impl<T> Insert<T> {
+    /// Creates an `INSERT` statement with the default conflict resolution behavior,
+    /// which is `ABORT`.
+    pub const fn new() -> Self {
+        Self::with_behavior(ConflictResolution::Abort)
+    }
+
+    /// Creates an `INSERT` statement with the specified conflict resolution behavior.
+    pub const fn with_behavior(behavior: ConflictResolution) -> Self {
+        Insert {
+            behavior,
+            marker: PhantomData,
+        }
+    }
+
+    /// Creates an `INSERT OR IGNORE` statement.
+    pub const fn or_ignore() -> Self {
+        Self::with_behavior(ConflictResolution::Ignore)
+    }
+
+    /// Creates an `INSERT OR REPLACE` statement.
+    pub const fn or_replace() -> Self {
+        Self::with_behavior(ConflictResolution::Replace)
+    }
+}
 
 impl<T> Clone for Insert<T> {
     fn clone(&self) -> Self {
@@ -1098,13 +1213,16 @@ impl<T> Copy for Insert<T> {}
 
 impl<T> Default for Insert<T> {
     fn default() -> Self {
-        Insert(PhantomData)
+        Self::new()
     }
 }
 
 impl<T: Table> Debug for Insert<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Insert").field(&T::description().name).finish()
+        f.debug_struct("Insert")
+            .field("table", &T::description().name)
+            .field("behavior", &self.behavior)
+            .finish()
     }
 }
 
@@ -1117,7 +1235,7 @@ impl<T: Table> Query for Insert<T> {
         let desc = T::description();
         let mut sep = "";
 
-        write!(formatter, r#"INSERT INTO "{}"("#, desc.name)?;
+        write!(formatter, r#"INSERT OR {} INTO "{}"("#, self.behavior, desc.name)?;
 
         for col in desc.columns_for_insert() {
             write!(formatter, "{sep}\n    \"{col}\"", col = col.name)?;
@@ -1140,5 +1258,162 @@ impl<T: Table> Query for Insert<T> {
         }
 
         formatter.write_str("\n);")
+    }
+}
+
+/// The conflict resolution algorithm for e.g. `INSERT` and `CREATE TABLE` statements.
+///
+/// See the [SQLite docs](https://www.sqlite.org/lang_conflict.html) for details.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub enum ConflictResolution {
+    /// `INSERT OR ROLLBACK`: a constraint violation rolls back the entire transaction
+    /// and causes an error to be returned to the application.
+    Rollback,
+    /// `INSERT OR ABORT`: a constraint violation rolls back the current SQL statement
+    /// and causes an error to be returned to the application. **This is the default.**
+    #[default]
+    Abort,
+    /// `INSERT OR FAIL`: a constraint violation does not roll back any changes so far,
+    /// but it still causes an error to be returned to the application. A violation of
+    /// a FOREIGN KEY constraint behaves like `ABORT`.
+    Fail,
+    /// `INSERT OR IGNORE`: a constraint violation (except foreign key constraints)
+    /// causes the offending rows to simply be ignored. Violation of a foreign key
+    /// constraint causes an `ABORT`. Commonly used for implementing "insert if not
+    /// yet existent" semantics.
+    Ignore,
+    /// `INSERT OR REPLACE`: a constraint violation (except foreign key constraints
+    /// and `CHECK` constraints) causes the offending rows to be deleted, and the new
+    /// rows are then inserted. Commonly used for implementing "insert new if not yet
+    /// existent, update non-key attributes if already exists" semantics.
+    Replace,
+}
+
+/// Renders the SQL keyword representation of this conflict resolution algorithm.
+impl Display for ConflictResolution {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            ConflictResolution::Rollback => "ROLLBACK",
+            ConflictResolution::Abort => "ABORT",
+            ConflictResolution::Fail => "FAIL",
+            ConflictResolution::Ignore => "IGNORE",
+            ConflictResolution::Replace => "REPLACE",
+        })
+    }
+}
+
+/// A `SELECT` statement for retrieving all rows of a table.
+///
+/// The generic parameter `C` allows you to specify the collection type
+/// that you want to collect records into. It defaults to `Vec<T>`.
+///
+/// See the [SQLite docs](https://www.sqlite.org/lang_select.html) for details.
+/// ```
+/// # use std::collections::HashSet;
+/// # use nanosql::{Connection, ConnectionExt, Table, Param, ResultRecord, Select};
+/// #[derive(Clone, PartialEq, Eq, Hash, Debug, Table, Param, ResultRecord)]
+/// struct Food {
+///     name: String,
+///     sugar: u16,
+///     energy: u32,
+/// }
+///
+/// # fn main() -> nanosql::Result<()> {
+/// let foods = [
+///     Food { name: "beef".into(), sugar: 0, energy: 250 },
+///     Food { name: "fish".into(), sugar: 0, energy: 200 },
+///     Food { name: "fish".into(), sugar: 0, energy: 200 }, // oops, a duplicate!
+///     Food { name: "chocolate".into(), sugar: 61, energy: 545 },
+/// ];
+/// let mut conn = Connection::connect_in_memory()?;
+/// conn.create_table::<Food>()?;
+/// conn.insert_batch(foods.clone())?;
+///
+/// let all_foods = conn.compile_invoke(Select::<Food>::all(), ())?;
+/// assert_eq!(all_foods, foods);
+///
+/// let unique_foods = conn.compile_invoke(Select::<Food>::distinct(), ())?;
+/// assert_eq!(unique_foods.len(), 3);
+///
+/// let set_foods = conn.compile_invoke(Select::<Food, HashSet<_>>::all(), ())?;
+/// assert_eq!(set_foods.len(), unique_foods.len());
+///
+/// for f in unique_foods {
+///     assert!(set_foods.contains(&f));
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub struct Select<T, C = Vec<T>> {
+    distinct: bool,
+    marker: PhantomData<fn() -> (T, C)>,
+}
+
+impl<T, C> Select<T, C> {
+    /// Performs a regular `SELECT`, returning all rows.
+    pub const fn all() -> Self {
+        Select {
+            distinct: false,
+            marker: PhantomData,
+        }
+    }
+
+    /// Performs a `SELECT DISTINCT`, deduplicating identical rows.
+    pub const fn distinct() -> Self {
+        Select {
+            distinct: true,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<T, C> Clone for Select<T, C> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T, C> Copy for Select<T, C> {}
+
+/// The `Default` impl is equivalent with [`Select::all()`]:
+/// it performs a regular `SELECT`, returning all rows.
+impl<T, C> Default for Select<T, C> {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+impl<T: Table, C> Debug for Select<T, C> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Select")
+            .field("table", &T::description().name)
+            .field("distinct", &self.distinct)
+            .finish()
+    }
+}
+
+impl<T, C> Query for Select<T, C>
+where
+    T: Table + crate::row::ResultRecord,
+    C: crate::row::ResultSet + FromIterator<T>,
+{
+    type Input<'p> = ();
+    type Output = C;
+
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let desc = T::description();
+        let select_kw = if self.distinct { "SELECT DISTINCT" } else { "SELECT" };
+        let table_name = &desc.name;
+        let mut sep = "";
+
+        formatter.write_str(select_kw)?;
+
+        for col in &desc.columns {
+            let col_name = &col.name;
+            write!(formatter, "{sep}\n    \"{table_name}\".\"{col_name}\" AS '{col_name}'")?;
+            sep = ",";
+        }
+
+        write!(formatter, "\nFROM \"{table_name}\";")
     }
 }

@@ -1,4 +1,6 @@
-//! Meta-queries for high-level query plan and low-level bytecode program debugging
+//! Meta-queries for high-level query plan and low-level bytecode program debugging.
+//!
+//! See the [SQLite docs](https://www.sqlite.org/lang_explain.html) for details.
 
 use std::fmt::{self, Formatter};
 use std::collections::{BTreeMap, HashSet};
@@ -136,6 +138,8 @@ impl ResultRecord for VdbeInstruction {
 }
 
 /// A helper for explaining a query at the higher, query plan level.
+///
+/// See the [SQLite docs](https://www.sqlite.org/eqp.html) for details.
 ///
 /// ```
 /// # use nanosql::{define_query, Connection, ConnectionExt, Query, Table, Param, ResultRecord};
