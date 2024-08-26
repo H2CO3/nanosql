@@ -21,6 +21,7 @@ use std::sync::Arc;
 use crate::{
     query::Query,
     param::{Param, ParamPrefix},
+    row::{ResultRecord, ResultSet},
 };
 #[cfg(feature = "not-nan")]
 use ordered_float::NotNan;
@@ -135,6 +136,11 @@ pub trait Table {
     /// type or with a `DEFAULT` value), and/or generated columns.
     type InsertInput<'p>: InsertInput<'p, Table = Self>;
 
+    /// The subset of columns uniquely identifying a row.
+    /// If no primary key is declared on the table, this will be
+    /// an empty type, i.e., one which can not be instantiated.
+    type PrimaryKey;
+
     /// The value-level description of the table.
     fn description() -> TableDesc;
 }
@@ -149,11 +155,19 @@ where
     T::InsertInput<'p>: InsertInput<'p, Table = Self>,
 {
     type InsertInput<'q> = &'p T::InsertInput<'p>;
+    type PrimaryKey = T::PrimaryKey;
 
     fn description() -> TableDesc {
         <T as Table>::description()
     }
 }
+
+/// Denotes that a table has no declared `PRIMARY KEY`.
+/// Used as the `Table::PrimaryKey` associated type.
+/// This intentionally does not implement `InsertInput`
+/// or `Param`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum PrimaryKeyMissing {}
 
 /// A trait for denoting types used as parameters for `INSERT`ing
 /// into a given table. This is only a type-level marker, of which
@@ -346,6 +360,29 @@ impl TableDesc {
         }
 
         indexes
+    }
+
+    /// Returns the set of columns marked as `PRIMARY KEY`.
+    /// If the table has no primary key, returns an empty slice.
+    pub fn primary_key_columns(&self) -> &[String] {
+        // first, try the table-level PK constraint
+        for constr in &self.constraints {
+            if let TableConstraint::PrimaryKey { columns } = constr {
+                return columns;
+            }
+        }
+
+        // if there's none, find the (one and only) column-level PK constraint
+        for col in &self.columns {
+            for constr in &col.constraints {
+                if let ColumnConstraint::PrimaryKey = constr {
+                    return std::slice::from_ref(&col.name);
+                }
+            }
+        }
+
+        // if neither is present, then there is no PRIMARY KEY
+        &[]
     }
 }
 
@@ -1108,7 +1145,7 @@ impl<T: Table> Query for CreateTable<T> {
 /// }
 ///
 /// # fn main() -> nanosql::Result<()> {
-/// let foods = [
+/// let inserted_foods = [
 ///     Food { name: "beef".into(), sugar: 0, energy: 250 },
 ///     Food { name: "fish".into(), sugar: 0, energy: 200 },
 ///     Food { name: "chocolate".into(), sugar: 61, energy: 545 },
@@ -1116,8 +1153,8 @@ impl<T: Table> Query for CreateTable<T> {
 /// let mut conn = Connection::connect_in_memory()?;
 /// conn.create_table::<Food>()?;
 ///
-/// let flags = conn.insert_or_ignore_batch(foods.clone())?;
-/// assert_eq!(flags, [true, true, true]);
+/// let returned_foods = conn.insert_or_ignore_batch(inserted_foods.clone())?;
+/// assert!(returned_foods.iter().flatten().eq(&inserted_foods));
 ///
 /// // convenience query for retrieving the properties of the "fish" record
 /// define_query! {
@@ -1153,55 +1190,65 @@ impl<T: Table> Query for CreateTable<T> {
 /// );
 ///
 /// // IGNORE means no error, but the database is still not modified.
-/// let flag = conn.compile_invoke(
+/// let entity = conn.compile_invoke(
 ///     Insert::<Food>::or_ignore(),
 ///     Food { name: "fish".into(), sugar: 14, energy: 38 },
 /// )?;
-/// assert_eq!(flag, None);
+/// assert_eq!(entity, None);
 /// assert_eq!(
 ///     conn.compile_invoke(GetFish, ())?,
 ///     Single(Food { name: "fish".into(), sugar: 0, energy: 200 }),
 /// );
 ///
 /// // REPLACE means update the other fields of the conflicting row.
-/// let flag = conn.compile_invoke(
+/// let entity = conn.compile_invoke(
 ///     Insert::<Food>::or_replace(),
 ///     Food { name: "fish".into(), sugar: 15, energy: 39 },
 /// )?;
-/// assert_eq!(flag, Some(IgnoredAny));
+/// assert_eq!(
+///     entity,
+///     Some(Food { name: "fish".into(), sugar: 15, energy: 39 }),
+/// );
 /// assert_eq!(
 ///     conn.compile_invoke(GetFish, ())?,
 ///     Single(Food { name: "fish".into(), sugar: 15, energy: 39 }),
 /// );
 ///
 /// // INSERT OR IGNORE also works via a convenience extension method on `Connection`
-/// let flag = conn.insert_or_ignore_one(Food {
+/// let entity = conn.insert_or_ignore_one(Food {
 ///     name: "fish".into(),
 ///     sugar: 16,
 ///     energy: 49,
 /// })?;
-/// assert_eq!(flag, false);
+/// assert_eq!(entity, None);
 /// assert_eq!(
 ///     conn.compile_invoke(GetFish, ())?,
 ///     Single(Food { name: "fish".into(), sugar: 15, energy: 39 }),
 /// );
 ///
-/// let flag = conn.insert_or_ignore_one(Food {
+/// let entity = conn.insert_or_ignore_one(Food {
 ///     name: "plum".into(),
 ///     sugar: 43,
 ///     energy: 129,
 /// })?;
-/// assert_eq!(flag, true);
+/// assert_eq!(
+///     entity,
+///     Some(Food { name: "plum".into(), sugar: 43, energy: 129 })
+/// );
 ///
 /// // replacing also works using a convenience method on connections
-/// conn.insert_or_replace_one(Food {
+/// let replaced = conn.insert_or_replace_one(Food {
 ///     name: "fish".into(),
 ///     sugar: 17,
 ///     energy: 64,
 /// })?;
 /// assert_eq!(
+///     replaced,
+///     Food { name: "fish".into(), sugar: 17, energy: 64 },
+/// );
+/// assert_eq!(
 ///     conn.compile_invoke(GetFish, ())?,
-///     Single(Food { name: "fish".into(), sugar: 17, energy: 64 }),
+///     Single(replaced)
 /// );
 /// # Ok(())
 /// # }
@@ -1260,12 +1307,15 @@ impl<T: Table> Debug for Insert<T> {
     }
 }
 
-impl<T: Table> Query for Insert<T> {
+impl<T> Query for Insert<T>
+where
+    T: Table + ResultRecord
+{
     type Input<'p> = T::InsertInput<'p>;
 
     /// The optional is `Some(_)` if the row was inserted or updated, and `None`
     /// if it was ignored.
-    type Output = Option<crate::row::IgnoredAny>;
+    type Output = Option<T>;
 
     /// TODO(H2CO3): respect optional/defaulted columns
     fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
@@ -1294,7 +1344,15 @@ impl<T: Table> Query for Insert<T> {
             sep = ", ";
         }
 
-        formatter.write_str("\n)\nRETURNING 1 AS 'sentinel';")
+        formatter.write_str("\n)\nRETURNING")?;
+        sep = "";
+
+        for col in desc.columns {
+            write!(formatter, "{sep}\n    \"{col}\" AS '{col}'", col = col.name)?;
+            sep = ",";
+        }
+
+        formatter.write_str(";")
     }
 }
 
@@ -1431,8 +1489,8 @@ impl<T: Table, C> Debug for Select<T, C> {
 
 impl<T, C> Query for Select<T, C>
 where
-    T: Table + crate::row::ResultRecord,
-    C: FromIterator<T> + crate::row::ResultSet,
+    T: Table + ResultRecord,
+    C: FromIterator<T> + ResultSet,
 {
     type Input<'p> = ();
     type Output = C;
@@ -1452,5 +1510,243 @@ where
         }
 
         write!(formatter, "\nFROM \"{table_name}\";")
+    }
+}
+
+/// Retrieves a row based on its `PRIMARY KEY`.
+///
+/// ```
+/// # use nanosql::{Connection, ConnectionExt, Table, Param, ResultRecord, SelectByKey};
+/// #[derive(Clone, PartialEq, Eq, Debug, Table, Param, ResultRecord)]
+/// #[nanosql(pk = [title, founded_in_year])] // NB: columns are NOT in declaration order!
+/// struct Department {
+///     founded_in_year: u16,
+///     #[nanosql(rename = title)]
+///     legal_name: String,
+///     info: Box<str>,
+/// }
+///
+/// # fn main() -> nanosql::Result<()> {
+/// let mut conn = Connection::connect_in_memory()?;
+///
+/// conn.create_table::<Department>()?;
+/// conn.insert_batch([
+///     Department {
+///         founded_in_year: 1994,
+///         legal_name: "Department of Redundancy Department".into(),
+///         info: "A redundantly redundant department".into(),
+///     },
+///     Department {
+///         founded_in_year: 2019,
+///         legal_name: "COVID Prevention Task Force".into(),
+///         info: "Operational Group for COVID-19".into(),
+///     },
+///     Department {
+///         founded_in_year: 2007,
+///         legal_name: "Purple Dorm".into(),
+///         info: "Birth place of the iPhone".into(),
+///     },
+/// ])?;
+///
+/// let query = SelectByKey::<Department>::new();
+/// let key = ("COVID Prevention Task Force".to_string(), 2019);
+/// let dept_1 = conn.compile_invoke(query, &key)?.unwrap();
+///
+/// // There are helper methods on `ConnectionExt` for invoking `SelectByKey`
+/// let dept_2: Department = conn.select_by_key_opt(&key)?.unwrap();
+/// let dept_3: Department = conn.select_by_key(key)?;
+///
+/// assert_eq!(&*dept_1.info, "Operational Group for COVID-19");
+/// assert_eq!(dept_1, dept_2);
+/// assert_eq!(dept_1, dept_3);
+/// # Ok(())
+/// # }
+/// ```
+pub struct SelectByKey<T>(PhantomData<fn() -> T>);
+
+impl<T> SelectByKey<T> {
+    /// Instantiates the query. Equivalent with `Default::default()`, but `const`.
+    pub const fn new() -> Self {
+        SelectByKey(PhantomData)
+    }
+}
+
+impl<T> Clone for SelectByKey<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for SelectByKey<T> {}
+
+impl<T> Default for SelectByKey<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Table> Debug for SelectByKey<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("SelectByKey").field(&T::description().name).finish()
+    }
+}
+
+impl<T> Query for SelectByKey<T>
+where
+    T: Table + ResultRecord,
+    T::PrimaryKey: Param,
+{
+    type Input<'p> = T::PrimaryKey;
+    type Output = Option<T>;
+
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let desc = T::description();
+        let table_name = &desc.name;
+        let pk_cols = desc.primary_key_columns();
+        let mut sep = "";
+
+        formatter.write_str("SELECT")?;
+
+        for col in &desc.columns {
+            let col_name = &col.name;
+            write!(formatter, "{sep}\n    \"{table_name}\".\"{col_name}\" AS '{col_name}'")?;
+            sep = ",";
+        }
+
+        write!(formatter, "\nFROM \"{table_name}\"\nWHERE (")?;
+        sep = "";
+
+        for col in pk_cols {
+            write!(formatter, r#"{sep}"{col}""#)?;
+            sep = ", ";
+        }
+
+        formatter.write_str(") = (")?;
+        sep = "";
+
+        for i in 1..=pk_cols.len() {
+            write!(formatter, "{sep}?{i}")?;
+            sep = ", ";
+        }
+
+        formatter.write_str(");")
+    }
+}
+
+/// Deletes a row based on its `PRIMARY KEY`, and returns it.
+///
+/// ```
+/// # use nanosql::{Connection, ConnectionExt, Param, ResultRecord, Table, DeleteByKey};
+/// #[derive(Clone, PartialEq, Eq, Debug, Param, ResultRecord, Table)]
+/// struct Part {
+///     #[nanosql(pk)]
+///     serial: Box<str>,
+///     description: String,
+///     weight_g: u32,
+/// }
+///
+/// # fn main() -> nanosql::Result<()> {
+/// let mut conn = Connection::connect_in_memory()?;
+/// conn.create_table::<Part>()?;
+/// conn.insert_batch([
+///     Part {
+///         serial: "AKUWH198".into(),
+///         description: "Bluetooth LE controller".into(),
+///         weight_g: 23,
+///     },
+///     Part {
+///         serial: "9876abcd".into(),
+///         description: "Screw M30".into(),
+///         weight_g: 148,
+///     },
+/// ])?;
+///
+/// let mut query = conn.compile(DeleteByKey::<Part>::new())?;
+/// let key: Box<str> = "9876abcd".into();
+/// let screw = query.invoke(key.clone())?;
+///
+/// assert_eq!(screw.unwrap().description, "Screw M30"); // the correct record was returned
+/// assert_eq!(conn.select_by_key_opt(key.clone())?, None::<Part>); // record was in fact deleted
+/// assert_eq!(query.invoke(key)?, None); // can't delete already deleted record
+///
+/// let key: Box<str> = Box::<str>::from("AKUWH198");
+/// let ble: Option<Part> = conn.delete_by_key(key.clone())?;
+///
+/// assert_eq!(ble.unwrap().description, "Bluetooth LE controller"); // also works via ConnectionExt
+/// assert_eq!(conn.select_by_key_opt(key.clone())?, None::<Part>);
+/// assert_eq!(conn.delete_by_key::<Part, _>(key)?, None); // can't delete again
+///
+/// // initially non-existent record can't be deleted, either
+/// assert_eq!(query.invoke(Box::<str>::from("non-existent key"))?, None);
+/// # Ok(())
+/// # }
+/// ```
+pub struct DeleteByKey<T>(PhantomData<fn() -> T>);
+
+impl<T> DeleteByKey<T> {
+    /// Instantiates the query. Equivalent with `Default::default()`, but `const`.
+    pub const fn new() -> Self {
+        DeleteByKey(PhantomData)
+    }
+}
+
+impl<T> Clone for DeleteByKey<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for DeleteByKey<T> {}
+
+impl<T> Default for DeleteByKey<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: Table> Debug for DeleteByKey<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("DeleteByKey").field(&T::description().name).finish()
+    }
+}
+
+impl<T> Query for DeleteByKey<T>
+where
+    T: Table + ResultRecord,
+    T::PrimaryKey: Param,
+{
+    type Input<'p> = T::PrimaryKey;
+    type Output = Option<T>;
+
+    fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let desc = T::description();
+        let table_name = &desc.name;
+        let pk_cols = desc.primary_key_columns();
+        let mut sep = "";
+
+        write!(formatter, "DELETE FROM \"{table_name}\"\nWHERE (")?;
+
+        for col in pk_cols {
+            write!(formatter, r#"{sep}"{col}""#)?;
+            sep = ", ";
+        }
+
+        formatter.write_str(") = (")?;
+        sep = "";
+
+        for i in 1..=pk_cols.len() {
+            write!(formatter, "{sep}?{i}")?;
+            sep = ", ";
+        }
+
+        formatter.write_str(")\nRETURNING")?;
+        sep = "";
+
+        for col in desc.columns {
+            write!(formatter, "{sep}\n    \"{col}\" AS '{col}'", col = col.name)?;
+            sep = ",";
+        }
+
+        formatter.write_str(";")
     }
 }

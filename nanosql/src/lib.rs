@@ -17,10 +17,11 @@ pub extern crate rusqlite;
 
 pub use rusqlite::{
     Connection, Statement, Rows, Row,
-    types::{self, ToSql, FromSql, Value, ValueRef, ToSqlOutput, FromSqlResult},
+    types::{self, ToSql, FromSql, Value, ValueRef, ToSqlOutput, FromSqlResult, Null},
 };
 pub use query::Query;
-pub use table::{Table, InsertInput, TableDesc, Column, SqlTy, TyPrim, AsSqlTy, Insert, Select};
+pub use table::{Table, InsertInput, TableDesc, Column, SqlTy, TyPrim, AsSqlTy};
+pub use table::{Insert, Select, SelectByKey, DeleteByKey};
 pub use stmt::CompiledStatement;
 pub use conn::{ConnectionExt, TransactionExt};
 pub use param::{Param, ParamPrefix};

@@ -213,7 +213,9 @@ fn fill_db(conn: &mut Connection) -> Result<()> {
             name: "coli bacterium",
             kind: NameKind::CommonName,
         },
-    ])
+    ])?;
+
+    Ok(())
 }
 
 fn main() -> Result<()> {

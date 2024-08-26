@@ -1,7 +1,7 @@
-use nanosql::{Error, Result, Connection, ConnectionExt, Param, Table};
+use nanosql::{Error, Result, Connection, ConnectionExt, Param, ResultRecord, Table};
 
 
-#[derive(Clone, Debug, Param, Table)]
+#[derive(Clone, Debug, Param, ResultRecord, Table)]
 #[nanosql(unique = ["city", street_name, "building_no"])]
 #[nanosql(check = r#""floor" BETWEEN -10 AND 100"#, check = "building_no < 1000")]
 pub struct Address {

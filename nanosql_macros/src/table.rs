@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use proc_macro2::TokenStream;
 use syn::Error;
-use syn::{DeriveInput, Data, Fields, FieldsNamed};
+use syn::{DeriveInput, Data, Fields, FieldsNamed, Type, Token};
+use syn::punctuated::Punctuated;
 use syn::ext::IdentExt;
-use quote::quote;
+use quote::{quote, ToTokens};
 use deluxe::SpannedValue;
 use crate::util::{
     ContainerAttributes, FieldAttributes, IdentOrStr, TableIndexSpec, TableForeignKey,
@@ -51,8 +52,8 @@ fn expand_struct(
         .as_ref()
         .map_or_else(|| ty_name.unraw().to_string(), <_>::to_string);
 
-    let insert_input_ty = attrs.insert_input_ty;
-    let insert_input_lt = attrs.insert_input_lt;
+    let insert_input_ty = &attrs.insert_input_ty;
+    let insert_input_lt = &attrs.insert_input_lt;
 
     let attrs_for_each_field: Vec<FieldAttributes> = fields.named
         .iter()
@@ -79,6 +80,7 @@ fn expand_struct(
     validate_indexes(&attrs.index, &attrs_for_each_field, &col_name_str)?;
     validate_unique_constraints(&attrs.unique, &attrs_for_each_field, &col_name_str)?;
 
+    let pk_ty = primary_key_type(fields, &attrs, &attrs_for_each_field, &col_name_str)?;
     let col_ty = fields.named
         .iter()
         .zip(&attrs_for_each_field)
@@ -150,6 +152,7 @@ fn expand_struct(
     Ok(quote!{
         impl #impl_gen ::nanosql::Table for #ty_name #ty_gen #where_clause {
             type InsertInput<#insert_input_lt> = #insert_input_ty;
+            type PrimaryKey = #pk_ty;
 
             fn description() -> ::nanosql::TableDesc {
                 ::nanosql::TableDesc::new(#table_name) #(
@@ -393,4 +396,49 @@ fn validate_one_unique_constraint(
     }
 
     Ok(())
+}
+
+fn primary_key_type(
+    fields: &FieldsNamed,
+    container_attrs: &ContainerAttributes,
+    field_attrs: &[FieldAttributes],
+    col_names: &[String],
+) -> Result<TokenStream, Error> {
+    assert_eq!(fields.named.len(), field_attrs.len());
+    assert_eq!(fields.named.len(), col_names.len());
+
+    let names_to_types: HashMap<&str, &Type> = fields.named
+        .iter()
+        .zip(col_names)
+        .map(|(field, name)| (name.as_str(), &field.ty))
+        .collect();
+
+    if let Some(pk_cols) = container_attrs.primary_key.as_ref() {
+        let mut types: Punctuated<&Type, Token![,]> = pk_cols
+            .iter()
+            .map(|col| {
+                names_to_types
+                    .get(col.to_string().as_str())
+                    .copied()
+                    .ok_or_else(|| Error::new_spanned(col, format_args!("unknown PK column: {col}")))
+            })
+            .collect::<Result<_, _>>()?;
+
+        // add an explicit trailing comma in case the PK is composed of a single column only
+        if !types.empty_or_trailing() {
+            types.push_punct(<Token![,]>::default());
+        }
+
+        Ok(quote!{
+            (#types)
+        })
+    } else if let Some((col, _)) = fields.named
+        .iter()
+        .zip(field_attrs)
+        .find(|(_, attrs)| SpannedValue::into_inner(attrs.primary_key))
+    {
+        Ok(col.ty.to_token_stream())
+    } else {
+        Ok(quote!(::nanosql::table::PrimaryKeyMissing))
+    }
 }

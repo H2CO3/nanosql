@@ -228,6 +228,8 @@ There are two basic solutions to this problem:
   a more type-safe interface in queries: since SQLite treats `NaN` as the SQL `NULL` value, you
   may run into surprising errors when binding or retrieving an `f32::NAN` or `f64::NAN` and the
   corresponding parameter needs to be `NOT NULL`, or the source column *can* be `NULL`.
+* `chrono`: adds support for `DateTime<Utc | FixedOffset | Local>`, by serializing timestamps to
+  and from the RFC-3339 format.
 * `pretty-eqp`: use the `ptree` crate to pretty print the results of `EXPLAIN QUERY PLAN`. This
   will impl `Display` for `QueryPlan`, the return type of [`ConnectionExt::explain_query_plan()`],
   which renders the tree in a nice, human-readable format using ASCII art.
