@@ -1355,6 +1355,7 @@ where
     /// TODO(H2CO3): respect optional/defaulted columns
     fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         let desc = T::description();
+        let pfx = <Self::Input<'static> as Param>::PREFIX;
         let mut sep = "";
 
         write!(formatter, r#"INSERT OR {} INTO "{}"("#, self.behavior, desc.name)?;
@@ -1369,12 +1370,12 @@ where
 
         for (idx, col) in (1_usize..).zip(desc.columns_for_insert()) {
             // decide intelligently whether parameters should be named or numbered
-            let param_name: &dyn Display = match Self::Input::PREFIX {
+            let param_name: &dyn Display = match pfx {
                 ParamPrefix::Question => &idx,
-                ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => &col.name
+                ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => &col.name,
             };
 
-            write!(formatter, "{sep}\n    {pfx}{param_name}", pfx = Self::Input::PREFIX)?;
+            write!(formatter, "{sep}\n    {pfx}{param_name}")?;
 
             sep = ", ";
         }
@@ -1387,7 +1388,7 @@ where
             sep = ",";
         }
 
-        formatter.write_str(";")
+        formatter.write_char(';')
     }
 }
 
@@ -1638,6 +1639,7 @@ where
         let desc = T::description();
         let table_name = &desc.name;
         let pk_cols = desc.primary_key_columns();
+        let pfx = <Self::Input<'static> as Param>::PREFIX;
         let mut sep = "";
 
         formatter.write_str("SELECT")?;
@@ -1659,8 +1661,14 @@ where
         formatter.write_str(") = (")?;
         sep = "";
 
-        for i in 1..=pk_cols.len() {
-            write!(formatter, "{sep}?{i}")?;
+        for (idx, col) in (1_usize..).zip(pk_cols) {
+            // decide intelligently whether parameters should be named or numbered
+            let param_name: &dyn Display = match pfx {
+                ParamPrefix::Question => &idx,
+                ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => col,
+            };
+
+            write!(formatter, "{sep}{pfx}{param_name}")?;
             sep = ", ";
         }
 
@@ -1757,6 +1765,7 @@ where
         let desc = T::description();
         let table_name = &desc.name;
         let pk_cols = desc.primary_key_columns();
+        let pfx = <Self::Input<'static> as Param>::PREFIX;
         let mut sep = "";
 
         write!(formatter, "DELETE FROM \"{table_name}\"\nWHERE (")?;
@@ -1769,8 +1778,14 @@ where
         formatter.write_str(") = (")?;
         sep = "";
 
-        for i in 1..=pk_cols.len() {
-            write!(formatter, "{sep}?{i}")?;
+        for (idx, col) in (1_usize..).zip(pk_cols) {
+            // decide intelligently whether parameters should be named or numbered
+            let param_name: &dyn Display = match pfx {
+                ParamPrefix::Question => &idx,
+                ParamPrefix::Dollar | ParamPrefix::At | ParamPrefix::Colon => col,
+            };
+
+            write!(formatter, "{sep}{pfx}{param_name}")?;
             sep = ", ";
         }
 
@@ -1782,6 +1797,6 @@ where
             sep = ",";
         }
 
-        formatter.write_str(";")
+        formatter.write_char(';')
     }
 }
