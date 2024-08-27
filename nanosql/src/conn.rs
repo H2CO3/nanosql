@@ -103,22 +103,22 @@ pub trait ConnectionExt: Sealed {
 
     /// Returns the (single) row identified by its Primary Key if it exists.
     /// Returns an error if no row with the specified PK is in the table.
-    fn select_by_key<T, K>(&self, key: K) -> Result<T>
+    fn select_by_key<'p, T, K>(&self, key: K) -> Result<T>
     where
         T: Table + ResultRecord,
-        T::PrimaryKey: Param,
-        K: Borrow<T::PrimaryKey>,
+        for<'q> T::PrimaryKey<'q>: Param,
+        K: Borrow<T::PrimaryKey<'p>>,
     {
         self.select_by_key_opt(key)?.ok_or(Error::Sqlite(SqlError::QueryReturnedNoRows))
     }
 
     /// Returns the (single) row identified by its Primary Key if it exists.
     /// Returns `None` if no row with the specified PK is in the table.
-    fn select_by_key_opt<T, K>(&self, key: K) -> Result<Option<T>>
+    fn select_by_key_opt<'p, T, K>(&self, key: K) -> Result<Option<T>>
     where
         T: Table + ResultRecord,
-        T::PrimaryKey: Param,
-        K: Borrow<T::PrimaryKey>,
+        for<'q> T::PrimaryKey<'q>: Param,
+        K: Borrow<T::PrimaryKey<'p>>,
     {
         self.compile_invoke(SelectByKey::<T>::new(), key.borrow())
     }
@@ -297,11 +297,11 @@ pub trait ConnectionExt: Sealed {
     /// If the row was found (and deleted), it is returned as a `Some(_)`.
     /// If no row with the specified key existed in the database, then
     /// `None` is returned.
-    fn delete_by_key<T, K>(&self, key: K) -> Result<Option<T>>
+    fn delete_by_key<'p, T, K>(&self, key: K) -> Result<Option<T>>
     where
         T: Table + ResultRecord,
-        T::PrimaryKey: Param,
-        K: Borrow<T::PrimaryKey>,
+        for<'q> T::PrimaryKey<'q>: Param,
+        K: Borrow<T::PrimaryKey<'p>>,
     {
         self.compile_invoke(DeleteByKey::<T>::new(), key.borrow())
     }

@@ -57,6 +57,8 @@ fn expand_struct(
         impl #impl_gen ::nanosql::AsSqlTy for #ty_name #ty_gen #where_clause {
             const SQL_TY: ::nanosql::SqlTy = <#field_ty as ::nanosql::AsSqlTy>::SQL_TY;
 
+            type Borrowed<'p> = <#field_ty as ::nanosql::AsSqlTy>::Borrowed<'p>;
+
             fn format_check_constraint(
                 column: &dyn ::std::fmt::Display,
                 formatter: &mut ::std::fmt::Formatter<'_>,
@@ -106,6 +108,9 @@ fn expand_enum(
     Ok(quote!{
         impl #impl_gen ::nanosql::AsSqlTy for #ty_name #ty_gen #where_clause {
             const SQL_TY: ::nanosql::SqlTy = ::nanosql::SqlTy::new(::nanosql::TyPrim::Text);
+
+            /// all-unit `enum`s are trivially copiable or at least constructible
+            type Borrowed<'p> = Self;
 
             fn format_check_constraint(
                 column: &dyn ::std::fmt::Display,

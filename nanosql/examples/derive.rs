@@ -28,7 +28,7 @@ struct MusicalInstrument {
 }
 
 #[derive(Clone, Copy, Debug, Param, InsertInput)]
-#[nanosql(table = MusicalInstrument, insert_input_lt = 'make_lt)]
+#[nanosql(table = MusicalInstrument, input_lt = 'make_lt)]
 struct MusicalInstrumentInsertParams<'make_lt> {
     id: u32,
     make: &'make_lt str,

@@ -86,10 +86,10 @@ pub struct ContainerAttributes {
     /// For `#[derive(Table)]`: changes the `InsertInput` associated type from `Self`.
     #[deluxe(default = parse_quote!(Self))]
     pub insert_input_ty: Type,
-    /// For `#[derive(Table)]`: changes the declared lifetime parameter
-    /// of the  `InsertInput` associated type from the default `'p`.
+    /// For `#[derive(Table)]`: changes the declared lifetime parameter of the
+    /// `InsertInput` and `PrimaryKey` associated types from the default `'p`.
     #[deluxe(default = parse_quote!('p))]
-    pub insert_input_lt: Lifetime,
+    pub input_lt: Lifetime,
     /// For `#[derive(Table)]`: the name of the table itself.
     pub rename: Option<IdentOrStr>,
     /// For `#[derive(InsertInput)]`: the `Table` associated type of the insert input.

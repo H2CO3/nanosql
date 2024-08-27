@@ -16,10 +16,10 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
             "missing attribute `#[nanosql(table = ...)]` for InsertInput::Table associated type",
         )
     })?;
-    let insert_input_lt = attrs.insert_input_lt;
+    let input_lt = attrs.input_lt;
 
     Ok(quote!{
-        impl #impl_gen ::nanosql::table::InsertInput<#insert_input_lt>
+        impl #impl_gen ::nanosql::table::InsertInput<#input_lt>
             for #ty_name #ty_gen #where_clause
         {
             type Table = #table;

@@ -41,8 +41,9 @@ use chrono::{DateTime, Utc, FixedOffset, Local};
 /// * `#[nanosql(insert_input_ty = my::awesome::InsertType)]` changes the insert
 ///   parameter type of the table (i.e., the [`Table::InsertInput`] associated type)
 ///   from `Self` (the default) to whatever you specify.
-/// * `#[nanosql(insert_input_lt = 'foo)]` changes the default `'p` lifetime parameter
-///   of the insert input type to the specified lifetime.
+/// * `#[nanosql(input_lt = 'foo)]` changes the default `'p` lifetime parameter
+///   of the insert input type to the specified lifetime. This lifetime will
+///   also be used for defining the [`Table::PrimaryKey`] associated type.
 /// * `#[nanosql(rename = "TableName")]` changes the name of the table to the given
 ///   string, instead of using the name of the `struct` itself. The name may be either
 ///   a plain identifier (Rust keywords included), or a string literal.
@@ -139,7 +140,7 @@ pub trait Table {
     /// The subset of columns uniquely identifying a row.
     /// If no primary key is declared on the table, this will be
     /// an empty type, i.e., one which can not be instantiated.
-    type PrimaryKey;
+    type PrimaryKey<'p>;
 
     /// The value-level description of the table.
     fn description() -> TableDesc;
@@ -155,7 +156,7 @@ where
     T::InsertInput<'p>: InsertInput<'p, Table = Self>,
 {
     type InsertInput<'q> = &'p T::InsertInput<'p>;
-    type PrimaryKey = T::PrimaryKey;
+    type PrimaryKey<'q> = T::PrimaryKey<'q>;
 
     fn description() -> TableDesc {
         <T as Table>::description()
@@ -187,10 +188,10 @@ pub enum PrimaryKeyMissing {}
 ///   This attribute is **obligatory.** (It _could_ technically default to `Self`
 ///   for types that also implement `Table`, but that would be useless, due to
 ///   the blanket impl preventing another, conflicting impl on the same type.)
-/// * `#[nanosql(insert_input_lt = 'p)]`: allows specifying the type parameter
-///   of the trait in the impl. It defaults to `'p` (for parameters). This is
-///   **not** added to the list of generic arguments, so it should be an already
-///   existing generic lifetime parameter of the input type itself.
+/// * `#[nanosql(input_lt = 'p)]`: allows specifying the lifetime parameter of
+///   the trait in the impl. It defaults to `'p` (for parameters). This is
+///   **not** added to the list of generic arguments, so it should be an
+///   already existing generic lifetime parameter of the input type itself.
 ///
 /// See the [SQLite docs](https://www.sqlite.org/lang_insert.html) for details.
 pub trait InsertInput<'p>: Param {
@@ -878,6 +879,13 @@ pub trait AsSqlTy {
     /// The SQL type corresponding to this type.
     const SQL_TY: SqlTy;
 
+    /// The borrowed counterpart of this type (may be `Self`, e.g.
+    /// for trivially-copiable types such as integers and floats).
+    /// This is used e.g. for constructing the `Table::PrimaryKey`
+    /// associated type, which in turn serves as the input type of
+    /// helper queries such as [`SelectByKey`] and [`DeleteByKey`].
+    type Borrowed<'p>;
+
     /// If the domain of this type requires a CHECK constraint,
     /// this method should write out the relevant criteria. The
     /// column name will be given as the `column` argument. If
@@ -894,43 +902,47 @@ pub trait AsSqlTy {
 }
 
 macro_rules! impl_as_sql_ty_for_primitive {
-    ($($rust_ty:ty => $sql_ty:expr,)*) => {$(
+    ($($rust_ty:ty as $borrowed_ty:ty => $sql_ty:expr,)*) => {$(
         impl AsSqlTy for $rust_ty {
             const SQL_TY: SqlTy = $sql_ty;
+
+            type Borrowed<'p> = $borrowed_ty;
         }
     )*}
 }
 
 impl_as_sql_ty_for_primitive!{
-    i8      => SqlTy::new(TyPrim::Integer),
-    i16     => SqlTy::new(TyPrim::Integer),
-    i32     => SqlTy::new(TyPrim::Integer),
-    i64     => SqlTy::new(TyPrim::Integer),
-    isize   => SqlTy::new(TyPrim::Integer),
-    u8      => SqlTy::new(TyPrim::Integer),
-    u16     => SqlTy::new(TyPrim::Integer),
-    u32     => SqlTy::new(TyPrim::Integer),
-    u64     => SqlTy::new(TyPrim::Integer),
-    usize   => SqlTy::new(TyPrim::Integer),
-    f32     => SqlTy::nullable(TyPrim::Real),
-    f64     => SqlTy::nullable(TyPrim::Real),
-    str     => SqlTy::new(TyPrim::Text),
-    String  => SqlTy::new(TyPrim::Text),
-    [u8]    => SqlTy::new(TyPrim::Blob),
-    Vec<u8> => SqlTy::new(TyPrim::Blob),
+    i8      as Self     => SqlTy::new(TyPrim::Integer),
+    i16     as Self     => SqlTy::new(TyPrim::Integer),
+    i32     as Self     => SqlTy::new(TyPrim::Integer),
+    i64     as Self     => SqlTy::new(TyPrim::Integer),
+    isize   as Self     => SqlTy::new(TyPrim::Integer),
+    u8      as Self     => SqlTy::new(TyPrim::Integer),
+    u16     as Self     => SqlTy::new(TyPrim::Integer),
+    u32     as Self     => SqlTy::new(TyPrim::Integer),
+    u64     as Self     => SqlTy::new(TyPrim::Integer),
+    usize   as Self     => SqlTy::new(TyPrim::Integer),
+    f32     as Self     => SqlTy::nullable(TyPrim::Real),
+    f64     as Self     => SqlTy::nullable(TyPrim::Real),
+    str     as &'p str  => SqlTy::new(TyPrim::Text),
+    String  as &'p str  => SqlTy::new(TyPrim::Text),
+    [u8]    as &'p [u8] => SqlTy::new(TyPrim::Blob),
+    Vec<u8> as &'p [u8] => SqlTy::new(TyPrim::Blob),
 }
 
 #[cfg(feature = "chrono")]
 impl_as_sql_ty_for_primitive!{
-    DateTime<Utc> => SqlTy::new(TyPrim::Text),
-    DateTime<FixedOffset> => SqlTy::new(TyPrim::Text),
-    DateTime<Local> => SqlTy::new(TyPrim::Text),
+    DateTime<Utc>         as Self => SqlTy::new(TyPrim::Text),
+    DateTime<FixedOffset> as Self => SqlTy::new(TyPrim::Text),
+    DateTime<Local>       as Self => SqlTy::new(TyPrim::Text),
 }
 
 macro_rules! impl_as_sql_ty_for_non_zero {
     ($($ty:ty,)*) => {$(
         impl AsSqlTy for $ty {
             const SQL_TY: SqlTy = SqlTy::new(TyPrim::Integer);
+
+            type Borrowed<'p> = Self;
 
             fn format_check_constraint(
                 column: &dyn Display,
@@ -958,6 +970,8 @@ impl_as_sql_ty_for_non_zero!{
 impl AsSqlTy for bool {
     const SQL_TY: SqlTy = SqlTy::new(TyPrim::Integer);
 
+    type Borrowed<'p> = Self;
+
     fn format_check_constraint(column: &dyn Display, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(formatter, "{column} IN (0, 1)")
     }
@@ -966,19 +980,28 @@ impl AsSqlTy for bool {
 #[cfg(feature = "not-nan")]
 impl AsSqlTy for NotNan<f32> {
     const SQL_TY: SqlTy = SqlTy::new(TyPrim::Real);
+
+    type Borrowed<'p> = Self;
 }
 
 #[cfg(feature = "not-nan")]
 impl AsSqlTy for NotNan<f64> {
     const SQL_TY: SqlTy = SqlTy::new(TyPrim::Real);
+
+    type Borrowed<'p> = Self;
 }
 
 impl<const N: usize> AsSqlTy for [u8; N] {
     const SQL_TY: SqlTy = SqlTy::new(TyPrim::Blob);
+
+    /// This is not `&'p [u8]` so that we do not lose the type (and length) information.
+    type Borrowed<'p> = &'p Self;
 }
 
 impl<T: AsSqlTy> AsSqlTy for Option<T> {
     const SQL_TY: SqlTy = T::SQL_TY.as_nullable();
+
+    type Borrowed<'p> = Option<T::Borrowed<'p>>;
 
     fn format_check_constraint(
         column: &dyn Display,
@@ -992,6 +1015,8 @@ impl<T: AsSqlTy> AsSqlTy for Option<T> {
 impl<T: ?Sized + AsSqlTy> AsSqlTy for &T {
     const SQL_TY: SqlTy = T::SQL_TY;
 
+    type Borrowed<'p> = T::Borrowed<'p>;
+
     fn format_check_constraint(
         column: &dyn Display,
         formatter: &mut Formatter<'_>,
@@ -1002,6 +1027,8 @@ impl<T: ?Sized + AsSqlTy> AsSqlTy for &T {
 
 impl<T: ?Sized + AsSqlTy> AsSqlTy for &mut T {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    type Borrowed<'p> = T::Borrowed<'p>;
 
     fn format_check_constraint(
         column: &dyn Display,
@@ -1014,6 +1041,8 @@ impl<T: ?Sized + AsSqlTy> AsSqlTy for &mut T {
 impl<T: ?Sized + AsSqlTy> AsSqlTy for Box<T> {
     const SQL_TY: SqlTy = T::SQL_TY;
 
+    type Borrowed<'p> = T::Borrowed<'p>;
+
     fn format_check_constraint(
         column: &dyn Display,
         formatter: &mut Formatter<'_>,
@@ -1025,6 +1054,8 @@ impl<T: ?Sized + AsSqlTy> AsSqlTy for Box<T> {
 impl<T: ?Sized + AsSqlTy> AsSqlTy for Rc<T> {
     const SQL_TY: SqlTy = T::SQL_TY;
 
+    type Borrowed<'p> = T::Borrowed<'p>;
+
     fn format_check_constraint(
         column: &dyn Display,
         formatter: &mut Formatter<'_>,
@@ -1035,6 +1066,8 @@ impl<T: ?Sized + AsSqlTy> AsSqlTy for Rc<T> {
 
 impl<T: ?Sized + AsSqlTy> AsSqlTy for Arc<T> {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    type Borrowed<'p> = T::Borrowed<'p>;
 
     fn format_check_constraint(
         column: &dyn Display,
@@ -1049,6 +1082,8 @@ where
     T: ?Sized + ToOwned + AsSqlTy
 {
     const SQL_TY: SqlTy = T::SQL_TY;
+
+    type Borrowed<'p> = T::Borrowed<'p>;
 
     fn format_check_constraint(
         column: &dyn Display,
@@ -1549,11 +1584,11 @@ where
 /// ])?;
 ///
 /// let query = SelectByKey::<Department>::new();
-/// let key = ("COVID Prevention Task Force".to_string(), 2019);
-/// let dept_1 = conn.compile_invoke(query, &key)?.unwrap();
+/// let key = ("COVID Prevention Task Force", 2019);
+/// let dept_1 = conn.compile_invoke(query, key)?.unwrap();
 ///
 /// // There are helper methods on `ConnectionExt` for invoking `SelectByKey`
-/// let dept_2: Department = conn.select_by_key_opt(&key)?.unwrap();
+/// let dept_2: Department = conn.select_by_key_opt(key)?.unwrap();
 /// let dept_3: Department = conn.select_by_key(key)?;
 ///
 /// assert_eq!(&*dept_1.info, "Operational Group for COVID-19");
@@ -1594,9 +1629,9 @@ impl<T: Table> Debug for SelectByKey<T> {
 impl<T> Query for SelectByKey<T>
 where
     T: Table + ResultRecord,
-    T::PrimaryKey: Param,
+    for<'p> T::PrimaryKey<'p>: Param,
 {
-    type Input<'p> = T::PrimaryKey;
+    type Input<'p> = T::PrimaryKey<'p>;
     type Output = Option<T>;
 
     fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
@@ -1662,22 +1697,22 @@ where
 /// ])?;
 ///
 /// let mut query = conn.compile(DeleteByKey::<Part>::new())?;
-/// let key: Box<str> = "9876abcd".into();
-/// let screw = query.invoke(key.clone())?;
+/// let key = "9876abcd";
+/// let screw = query.invoke(key)?;
 ///
-/// assert_eq!(screw.unwrap().description, "Screw M30"); // the correct record was returned
-/// assert_eq!(conn.select_by_key_opt(key.clone())?, None::<Part>); // record was in fact deleted
+/// assert_eq!(screw.unwrap().description, "Screw M30"); // correct record was returned
+/// assert_eq!(conn.select_by_key_opt(key)?, None::<Part>); // record was in fact deleted
 /// assert_eq!(query.invoke(key)?, None); // can't delete already deleted record
 ///
-/// let key: Box<str> = Box::<str>::from("AKUWH198");
-/// let ble: Option<Part> = conn.delete_by_key(key.clone())?;
+/// let key = "AKUWH198";
+/// let ble: Option<Part> = conn.delete_by_key(key)?;
 ///
-/// assert_eq!(ble.unwrap().description, "Bluetooth LE controller"); // also works via ConnectionExt
-/// assert_eq!(conn.select_by_key_opt(key.clone())?, None::<Part>);
+/// assert_eq!(ble.unwrap().description, "Bluetooth LE controller"); // via ConnectionExt
+/// assert_eq!(conn.select_by_key_opt(key)?, None::<Part>);
 /// assert_eq!(conn.delete_by_key::<Part, _>(key)?, None); // can't delete again
 ///
 /// // initially non-existent record can't be deleted, either
-/// assert_eq!(query.invoke(Box::<str>::from("non-existent key"))?, None);
+/// assert_eq!(query.invoke("non-existent key")?, None);
 /// # Ok(())
 /// # }
 /// ```
@@ -1713,9 +1748,9 @@ impl<T: Table> Debug for DeleteByKey<T> {
 impl<T> Query for DeleteByKey<T>
 where
     T: Table + ResultRecord,
-    T::PrimaryKey: Param,
+    for<'p> T::PrimaryKey<'p>: Param,
 {
-    type Input<'p> = T::PrimaryKey;
+    type Input<'p> = T::PrimaryKey<'p>;
     type Output = Option<T>;
 
     fn format_sql(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
