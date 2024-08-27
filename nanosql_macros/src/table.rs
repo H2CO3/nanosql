@@ -406,6 +406,21 @@ fn primary_key_type(
     assert_eq!(fields.named.len(), field_attrs.len());
     assert_eq!(fields.named.len(), col_names.len());
 
+    let col_pk = fields.named
+        .iter()
+        .zip(field_attrs)
+        .find(|(_, attrs)| SpannedValue::into_inner(attrs.primary_key));
+
+    // If the PK type is explicitly specified, simply return it verbatim.
+    // Check that the table _actually_ has a PK; disallow if it doesn't.
+    if let Some(pk_ty) = container_attrs.primary_key_ty.as_ref() {
+        if container_attrs.primary_key.is_some() || col_pk.is_some() {
+            return Ok(quote!(#pk_ty));
+        } else {
+            return Err(Error::new_spanned(pk_ty, "Explicit PK type given to table without a PK"));
+        }
+    }
+
     let input_lt = &container_attrs.input_lt;
     let names_to_sql_types: HashMap<&str, &Type> = fields.named
         .iter()
@@ -434,11 +449,7 @@ fn primary_key_type(
         Ok(quote!{
             (#(#types,)*)
         })
-    } else if let Some((field, attrs)) = fields.named
-        .iter()
-        .zip(field_attrs)
-        .find(|(_, attrs)| SpannedValue::into_inner(attrs.primary_key))
-    {
+    } else if let Some((field, attrs)) = col_pk {
         // respect `[nanosql(sql_ty = "...")]` attribute
         let sql_ty = attrs.sql_ty.as_ref().unwrap_or(&field.ty);
         Ok(quote!(<#sql_ty as ::nanosql::AsSqlTy>::Borrowed<#input_lt>))

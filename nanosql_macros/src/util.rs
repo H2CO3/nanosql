@@ -85,7 +85,13 @@ pub struct ContainerAttributes {
     pub param_prefix: Option<ParamPrefix>,
     /// For `#[derive(Table)]`: changes the `InsertInput` associated type from `Self`.
     #[deluxe(default = parse_quote!(Self))]
+    #[deluxe(alias = insert_ty, alias = insert_type, alias = insert_input_type)]
     pub insert_input_ty: Type,
+    /// For `#[derive(Table)]`: changes the `PrimaryKey` associated type from the default
+    /// (single scalar for column-level PK, tuple for table-level PK). Used for giving
+    /// names to the columns of a compound PK, for readability and correctness.
+    #[deluxe(alias = pk_ty, alias = pk_type, alias = primary_key_type)]
+    pub primary_key_ty: Option<Type>,
     /// For `#[derive(Table)]`: changes the declared lifetime parameter of the
     /// `InsertInput` and `PrimaryKey` associated types from the default `'p`.
     #[deluxe(default = parse_quote!('p))]
