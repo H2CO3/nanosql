@@ -34,5 +34,8 @@ pub use ordered_float::NotNan;
 #[cfg(feature = "chrono")]
 pub use chrono::{DateTime, FixedOffset, Utc};
 
+#[cfg(feature = "uuid")]
+pub use uuid::Uuid;
+
 #[cfg(feature = "derive")]
 pub use nanosql_macros::{ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table, InsertInput};

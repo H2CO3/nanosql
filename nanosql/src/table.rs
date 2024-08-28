@@ -27,6 +27,8 @@ use crate::{
 use ordered_float::NotNan;
 #[cfg(feature = "chrono")]
 use chrono::{DateTime, Utc, FixedOffset, Local};
+#[cfg(feature = "uuid")]
+use uuid::Uuid;
 
 
 /// Implemented by UDTs that map to an SQL table. This is a convenience helper trait
@@ -994,6 +996,11 @@ impl_as_sql_ty_for_primitive!{
     DateTime<Utc>         as Self => SqlTy::new(TyPrim::Text),
     DateTime<FixedOffset> as Self => SqlTy::new(TyPrim::Text),
     DateTime<Local>       as Self => SqlTy::new(TyPrim::Text),
+}
+
+#[cfg(feature = "uuid")]
+impl_as_sql_ty_for_primitive!{
+    Uuid as Self => SqlTy::new(TyPrim::Blob),
 }
 
 macro_rules! impl_as_sql_ty_for_non_zero {

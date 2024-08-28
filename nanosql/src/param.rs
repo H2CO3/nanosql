@@ -23,6 +23,8 @@ use rusqlite::{Statement, ToSql, types::{Value, ValueRef, Null, ToSqlOutput}};
 use ordered_float::NotNan;
 #[cfg(feature = "chrono")]
 use chrono::{DateTime, Utc, FixedOffset, Local};
+#[cfg(feature = "uuid")]
+use uuid::Uuid;
 use crate::error::{Error, Result};
 
 
@@ -183,13 +185,6 @@ impl_param_for_primitive!{
     Null,
 }
 
-#[cfg(feature = "chrono")]
-impl_param_for_primitive! {
-    DateTime<Utc>,
-    DateTime<FixedOffset>,
-    DateTime<Local>,
-}
-
 #[cfg(feature = "not-nan")]
 impl Param for NotNan<f32> {
     /// Primitives are bound as positional parameters, hence the prefix is '?'
@@ -208,6 +203,18 @@ impl Param for NotNan<f64> {
     fn bind(&self, statement: &mut Statement<'_>) -> Result<()> {
         bind_primitive(statement, self.into_inner())
     }
+}
+
+#[cfg(feature = "chrono")]
+impl_param_for_primitive! {
+    DateTime<Utc>,
+    DateTime<FixedOffset>,
+    DateTime<Local>,
+}
+
+#[cfg(feature = "uuid")]
+impl_param_for_primitive!{
+    Uuid,
 }
 
 impl Param for ValueRef<'_> {

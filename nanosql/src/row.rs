@@ -24,6 +24,8 @@ use rusqlite::{Statement, Row, Rows, types::{Value, ValueRef, ToSqlOutput, FromS
 use ordered_float::NotNan;
 #[cfg(feature = "chrono")]
 use chrono::{DateTime, Utc, FixedOffset, Local};
+#[cfg(feature = "uuid")]
+use uuid::Uuid;
 use crate::error::{Error, Result, RowCount};
 
 
@@ -419,6 +421,11 @@ impl_result_record_for_primitive! {
     DateTime<Utc>,
     DateTime<FixedOffset>,
     DateTime<Local>,
+}
+
+#[cfg(feature = "uuid")]
+impl_result_record_for_primitive!{
+    Uuid,
 }
 
 macro_rules! impl_result_record_for_tuple {
