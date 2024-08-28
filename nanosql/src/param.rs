@@ -25,6 +25,8 @@ use ordered_float::NotNan;
 use chrono::{DateTime, Utc, FixedOffset, Local};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
+#[cfg(feature = "json")]
+use serde_json::Value as JsonValue;
 use crate::error::{Error, Result};
 
 
@@ -215,6 +217,11 @@ impl_param_for_primitive! {
 #[cfg(feature = "uuid")]
 impl_param_for_primitive!{
     Uuid,
+}
+
+#[cfg(feature = "json")]
+impl_param_for_primitive!{
+    JsonValue,
 }
 
 impl Param for ValueRef<'_> {

@@ -18,6 +18,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
+use rusqlite::types::{Value, ValueRef, ToSqlOutput};
 use crate::{
     query::Query,
     param::{Param, ParamPrefix},
@@ -29,6 +30,8 @@ use ordered_float::NotNan;
 use chrono::{DateTime, Utc, FixedOffset, Local};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
+#[cfg(feature = "json")]
+use serde_json::Value as JsonValue;
 
 
 /// Implemented by UDTs that map to an SQL table. This is a convenience helper trait
@@ -989,6 +992,11 @@ impl_as_sql_ty_for_primitive!{
     String  as &'p str  => SqlTy::new(TyPrim::Text),
     [u8]    as &'p [u8] => SqlTy::new(TyPrim::Blob),
     Vec<u8> as &'p [u8] => SqlTy::new(TyPrim::Blob),
+
+    // a nullable blob is the most general type, accomodating all other (dynamic) types
+    Value           as ValueRef<'p>    => SqlTy::nullable(TyPrim::Blob),
+    ValueRef<'_>    as ValueRef<'p>    => SqlTy::nullable(TyPrim::Blob),
+    ToSqlOutput<'_> as ToSqlOutput<'p> => SqlTy::nullable(TyPrim::Blob),
 }
 
 #[cfg(feature = "chrono")]
@@ -1001,6 +1009,13 @@ impl_as_sql_ty_for_primitive!{
 #[cfg(feature = "uuid")]
 impl_as_sql_ty_for_primitive!{
     Uuid as Self => SqlTy::new(TyPrim::Blob),
+}
+
+#[cfg(feature = "json")]
+impl_as_sql_ty_for_primitive!{
+    // we must represent a JSON value as a (nullable) BLOB,
+    // because that's the most general type.
+    JsonValue as &'p JsonValue => SqlTy::nullable(TyPrim::Blob),
 }
 
 macro_rules! impl_as_sql_ty_for_non_zero {

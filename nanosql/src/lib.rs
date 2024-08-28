@@ -37,5 +37,8 @@ pub use chrono::{DateTime, FixedOffset, Utc};
 #[cfg(feature = "uuid")]
 pub use uuid::Uuid;
 
+#[cfg(feature = "json")]
+pub use serde_json::Value as JsonValue;
+
 #[cfg(feature = "derive")]
 pub use nanosql_macros::{ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table, InsertInput};

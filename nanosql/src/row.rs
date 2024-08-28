@@ -26,6 +26,8 @@ use ordered_float::NotNan;
 use chrono::{DateTime, Utc, FixedOffset, Local};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
+#[cfg(feature = "json")]
+use serde_json::Value as JsonValue;
 use crate::error::{Error, Result, RowCount};
 
 
@@ -426,6 +428,11 @@ impl_result_record_for_primitive! {
 #[cfg(feature = "uuid")]
 impl_result_record_for_primitive!{
     Uuid,
+}
+
+#[cfg(feature = "json")]
+impl_result_record_for_primitive!{
+    JsonValue,
 }
 
 macro_rules! impl_result_record_for_tuple {

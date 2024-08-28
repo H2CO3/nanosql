@@ -230,6 +230,8 @@ There are two basic solutions to this problem:
   corresponding parameter needs to be `NOT NULL`, or the source column *can* be `NULL`.
 * `chrono`: adds support for `DateTime<Utc | FixedOffset | Local>`, by serializing timestamps to
   and from the RFC-3339 format.
+* `uuid`: adds support for `uuid::Uuid`, by representing UUIDs as 16-byte blobs.
+* `json`: adds support for `serde_json::Value` (re-exported as `JsonValue`).
 * `pretty-eqp`: use the `ptree` crate to pretty print the results of `EXPLAIN QUERY PLAN`. This
   will impl `Display` for `QueryPlan`, the return type of [`ConnectionExt::explain_query_plan()`],
   which renders the tree in a nice, human-readable format using ASCII art.
