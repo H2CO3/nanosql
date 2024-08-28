@@ -6,7 +6,7 @@ authors = ["Arpad Goretity 'H2CO3' <arpad.goretity@gmail.com>"]
 description = "Tiny, strongly-typed data mapper for SQLite"
 license = "MIT"
 documentation = "https://docs.rs/nanosql"
-homepage = "https://github.com/H2CO3/nanosql"
+homepage = "https://h2co3.github.io/nanosql"
 repository = "https://github.com/H2CO3/nanosql"
 
 [dependencies]

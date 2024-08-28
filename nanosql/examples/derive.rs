@@ -1,5 +1,6 @@
+use std::borrow::Cow;
 use nanosql::{Result, Connection, ConnectionExt};
-use nanosql::{AsSqlTy, ToSql, FromSql, Param, ResultRecord, Table, InsertInput};
+use nanosql::{AsSqlTy, ToSql, FromSql, Param, ResultRecord, Table, InsertInput, Error};
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, AsSqlTy, ToSql, FromSql)]
@@ -56,6 +57,53 @@ struct Hierarchy {
     value: f32,
 }
 
+/// This is a table that intentionally does not declare any `PRIMARY KEY`.
+#[derive(Table, Param)]
+struct TableWithoutPK {
+    /// intentionally misleading name: this field is **NOT** marked as `#[nanosql(pk)]`.
+    pk: String,
+    /// this would make a fine `PRIMARY KEY`, but alas, it isn't.
+    some_other_field: i64,
+}
+
+/// This table demonstrates the correct use of a custom `PRIMARY KEY` type.
+#[derive(Clone, PartialEq, Debug, Table, Param, ResultRecord)]
+#[nanosql(pk = [pk_first, pk_second])]
+#[nanosql(input_lt = 'input, pk_ty = CorrectCustomPK<'input>)]
+struct TableWithCorrectCustomPK {
+    unused: String,
+    #[nanosql(rename = "pk_first")]
+    pk_1: usize,
+    #[nanosql(rename = pk_second)]
+    pk_2: Box<str>,
+    irrelevant: Option<f32>,
+}
+
+/// Field order intentionally permuted
+#[derive(Clone, Copy, Debug, Param)]
+struct CorrectCustomPK<'a> {
+    /// this field/bind parameter is not renamed
+    pk_second: &'a str,
+    #[nanosql(rename = pk_first)]
+    pk_one: usize,
+}
+
+/// This table demonstrates an **incorrect** custom PK type: one where the
+/// field names of the custom type do not match the column names of the PK.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Table, Param, ResultRecord)]
+#[nanosql(pk = [field_abc, field_xyz], pk_ty = BadCustomPK)]
+struct TableWithBadCustomPK {
+    field_abc: u32,
+    field_xyz: u64,
+    field_pqr: i16,
+}
+
+#[derive(Clone, Copy, Debug, Param)]
+struct BadCustomPK {
+    field_abc: u32,
+    field_nop: u64,
+}
+
 nanosql::define_query! {
     /// Inserts an instrument of the given kind, using the default value for its `make` column.
     #[derive(Clone, Copy, Default, Debug)]
@@ -70,7 +118,18 @@ nanosql::define_query! {
     }
 }
 
+// This is just to verify that a table without a PK has an uninhabited
+// `PrimaryKey` associated type when `Table` is automatically derived.
+fn assert_uninhabited_pk_ty<T>()
+where
+    T: Table<PrimaryKey<'static> = nanosql::table::PrimaryKeyMissing>
+{
+}
+
 fn main() -> Result<()> {
+    // Perform type-level assertions.
+    assert_uninhabited_pk_ty::<TableWithoutPK>();
+
     // First, we open a database connection.
     let mut conn = Connection::connect_in_memory()?;
 
@@ -151,6 +210,66 @@ fn main() -> Result<()> {
         },
     ]);
     assert!(dup_multi_col_pk_result.is_err(), "duplicate multi-column PK must not be allowed");
+
+    // make sure that custom PK type is allowed when field/parameter/column names match
+    conn.create_table::<TableWithCorrectCustomPK>()?;
+    conn.insert_batch([
+        TableWithCorrectCustomPK {
+            unused: "not part of the key".into(),
+            pk_1: 42,
+            pk_2: "foo".into(),
+            irrelevant: None,
+        },
+        TableWithCorrectCustomPK {
+            unused: "lorem ipsum dolor sit amet".into(),
+            pk_1: 42,
+            pk_2: "quux".into(),
+            irrelevant: Some(1.25),
+        },
+        TableWithCorrectCustomPK {
+            unused: "consectetur adespicit elit".into(),
+            pk_1: 67,
+            pk_2: "thing".into(),
+            irrelevant: Some(-15.4),
+        },
+    ])?;
+    let thing: TableWithCorrectCustomPK = conn.select_by_key(CorrectCustomPK {
+        pk_second: "quux",
+        pk_one: 42,
+    })?;
+    dbg!(&thing);
+    assert_eq!(thing.irrelevant, Some(1.25));
+    assert_eq!(thing.unused, "lorem ipsum dolor sit amet");
+
+    // renaming of key columns shouldn't cause any other kind of confusion
+    assert_eq!(
+        conn.select_by_key_opt::<TableWithCorrectCustomPK, _>(CorrectCustomPK {
+            pk_second: "thing",
+            pk_one: 42,
+        })?,
+        None
+    );
+
+    // ensure that custom PK types with incorrect field names cause an appropriate error
+    conn.create_table::<TableWithBadCustomPK>()?;
+    conn.insert_batch([
+        TableWithBadCustomPK {
+            field_abc: 1,
+            field_pqr: 2,
+            field_xyz: 3,
+        },
+        TableWithBadCustomPK {
+            field_abc: 4,
+            field_pqr: 5,
+            field_xyz: 6,
+        },
+    ])?;
+    let result: Result<TableWithBadCustomPK> = conn.select_by_key(BadCustomPK {
+        field_abc: 1,
+        field_nop: 2,
+    });
+    dbg!(&result);
+    assert!(matches!(result, Err(Error::UnknownParam(Cow::Borrowed("$field_nop")))));
 
     Ok(())
 }

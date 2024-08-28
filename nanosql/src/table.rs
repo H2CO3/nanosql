@@ -36,18 +36,22 @@ use chrono::{DateTime, Utc, FixedOffset, Local};
 ///
 /// This trait can be automatically derived on `struct`s with named fields.
 ///
-/// Supported `struct`-level attributes are:
+/// ## Supported `struct`-level attributes
 ///
-/// * `#[nanosql(insert_input_ty = my::awesome::InsertType)]` changes the insert
+/// * `#[nanosql(insert_input_ty = my::awesome::InsertType)]`: Changes the insert
 ///   parameter type of the table (i.e., the [`Table::InsertInput`] associated type)
-///   from `Self` (the default) to whatever you specify.
-/// * `#[nanosql(input_lt = 'foo)]` changes the default `'p` lifetime parameter
+///   from `Self` (the default) to the specified one.
+/// * `#[nanosql(pk_ty = some::primary_key::Type)]`: Changes the `PrimaryKey`
+///   associated type from the default to the explicitly specified. Useful when
+///   a multi-column primary key would benefit from named fields, so the default
+///   type should be changed to a user-defined `struct` with named fields.
+/// * `#[nanosql(input_lt = 'foo)]`: Changes the default `'p` lifetime parameter
 ///   of the insert input type to the specified lifetime. This lifetime will
 ///   also be used for defining the [`Table::PrimaryKey`] associated type.
-/// * `#[nanosql(rename = "TableName")]` changes the name of the table to the given
+/// * `#[nanosql(rename = "TableName")]`: Changes the name of the table to the given
 ///   string, instead of using the name of the `struct` itself. The name may be either
 ///   a plain identifier (Rust keywords included), or a string literal.
-/// * `#[nanosql(rename_all = "casing")]` renames all fields based on the
+/// * `#[nanosql(rename_all = "casing")]`: Renames all fields based on the
 ///   specified case-transforming convention. Valid `casing` conventions are:
 ///
 ///   * `lower_snake_case`
@@ -59,26 +63,45 @@ use chrono::{DateTime, Utc, FixedOffset, Local};
 ///   * `Title Case`
 ///   * `Train-Case`
 ///
-/// * `#[nanosql(primary_key = ["column_1", "column_N"])]` or
-///   `#[nanosql(pk = [column_1, column_N])]`: specifies that these columns form the
-///   (compound) `PRIMARY KEY` of this table. You may not specify a field-level primary
-///   key if you use this attribute. This attribute respects the `rename` and `rename_all`
-///   attributes. The column names may be specified either as bare Rust identifiers or
-///   as string literals (if needed). The tuple of columns may **not** be empty.
-/// * `#[nanosql(foreign_key("TableName" => (my_col_1 = other_col_1, my_col_N = other_col_n)))]` or
-///   `#[nanosql(fk(TableName => ("my_col_1" => "other_col_1", "my_col_N" => "other_col_N")))]`:
-///   specifies a compound `FOREIGN KEY` on the table. The specified tuple of columns must
+/// * ```text
+///   #[nanosql(primary_key = ["column_1", "column_N"])]
+///   ```
+///   or
+///   ```text
+///   #[nanosql(pk = [column_1, column_N])]
+///   ```
+///   Specifies that these columns form the (compound) `PRIMARY KEY` of this table.
+///   You may not specify a field-level primary key if you use this attribute.
+///   This attribute respects the `rename` and `rename_all` attributes. The column
+///   names may be specified either as bare Rust identifiers or as string literals
+///   (if needed). The tuple of columns may **not** be empty.
+/// * ```text
+///   #[nanosql(foreign_key("TableName" => (my_col_1 = other_col_1, my_col_N = other_col_n)))]
+///   ```
+///   or
+///   ```text
+///   #[nanosql(fk(TableName => ("my_col_1" => "other_col_1", "my_col_N" => "other_col_N")))]
+///   ```
+///   Specifies a compound `FOREIGN KEY` on the table. The specified tuple of columns must
 ///   **not** be empty. You can repeat this attribute with different combinations of columns
 ///   as many times as you want. The table and column names may be identifiers or strings.
-/// * `#[nanosql(unique = [column_1, column_N])]` or `#[nanosql(unique = ["column_1", "column_N"])]`:
-///   adds a potentially multi-column `UNIQUE` constraint (and the corresponding implicit index)
+/// * ```text
+///   #[nanosql(unique = [column_1, column_N])]
+///   ```
+///   or
+///   ```text
+///   #[nanosql(unique = ["column_1", "column_N"])]
+///   ```
+///   Adds a potentially multi-column `UNIQUE` constraint (and the corresponding implicit index)
 ///   to the table with the specified set of keys. The specified list of columns may **not** be
 ///   empty. You can apply this attribute many times.
-/// * `#[nanosql(check = "SQL expression")]`: adds a table-level `CHECK` constraint,
+/// * `#[nanosql(check = "SQL expression")]`: Adds a table-level `CHECK` constraint,
 ///   which has access to all columns of the table. You can apply this attribute many times.
-///   The derive macro will ensure that the expression you specify is syntactically valid.
-/// * `#[nanosql(index(unique, columns(foo, "bar" = desc, qux = asc), where = "expression")]`:
-///   adds an explicit index to the specified tuple, with each column being sorted according to
+///   The derive macro will ensure that the expressions you specify are syntactically valid.
+/// * ```text
+///   #[nanosql(index(unique, columns(foo, "bar" = desc, qux = asc), where = "expression")]
+///   ```
+///   Adds an explicit index to the specified tuple, with each column being sorted according to
 ///   the given direction. If the sorting direction is not specified, it defaults to `asc`ending.
 ///
 ///   If the `where` clause is specified, a partial index will be created using the predicate.
@@ -88,37 +111,51 @@ use chrono::{DateTime, Utc, FixedOffset, Local};
 ///   For partial indexes, this is different from the set of columns having all unique tuples.
 ///   You may apply this attribute many times to create multiple indexes.
 ///
-/// Supported field-level attributes are:
+/// ## Supported field-level attributes
 ///
-/// * `#[nanosql(rename = "column_name")]`: changes the name of the column
+/// * `#[nanosql(rename = "column_name")]`: Changes the name of the column
 ///   to the specified string, instead of using the name of the field. The
-///   name may be specified with either an identifier or a string literal.
-/// * `#[nanosql(sql_ty = path::to::AsSqlTy)]`: forwards the `AsSqlTy` impl
+///   name may be specified either as an identifier or as a string literal.
+/// * `#[nanosql(sql_ty = path::to::AsSqlTy)]`: Forwards the `AsSqlTy` impl
 ///   to the specified type, instead of using the field's own declared type.
-/// * `#[nanosql(unique)]`: imposes an SQL `UNIQUE` constraint on the field.
-/// * `#[nanosql(check = "expression1", check = "expression2", ...)]`:
-///    imposes additional `CHECK` constraints. The derive macro will ensure
-///    that the expression you specify is syntactically valid.
-/// * `#[nanosql(default = "expression")]`: apply a default value (literal
+/// * `#[nanosql(unique)]`: Imposes an SQL `UNIQUE` constraint on the field.
+/// * ```text
+///   #[nanosql(check = "expression1", check = "expression2", ...)]
+///   ```
+///   Imposes additional `CHECK` constraints. The derive macro will ensure
+///   that the expressions you specify are syntactically valid.
+/// * `#[nanosql(default = "expression")]`: Applies a default value (literal
 ///   or full-blown SQL expression) upon an `INSERT` statements, when the
 ///   value for the column is omitted. The derive macro will ensure that
 ///   the expression you specify is syntactically valid.
-/// * `#[nanosql(generated(virtual = "expression"))]` or
-///   `#[nanosql(generated(stored = "expression"))]`: declares the column
-///   as `GENERATED ALWAYS [VIRTUAL | STORED]`. The derive macro will ensure
-///   that the expression you specify is syntactically valid.
-/// * `#[nanosql(primary_key)]` or `#[nanosql(pk)]`: defines the column as
+/// * ```text
+///   #[nanosql(generated(virtual = "expression"))]
+///   ```
+///   or
+///   ```text
+///   #[nanosql(generated(stored = "expression"))]
+///   ```
+///   declares the column as `GENERATED ALWAYS [VIRTUAL | STORED]`. The derive
+///   macro will ensure that the expression you specify is syntactically valid.
+/// * `#[nanosql(primary_key)]` or `#[nanosql(pk)]`: Defines the column as
 ///   the `PRIMARY KEY` of the table. This may only be used on a single column
 ///   within any given table. This attribute may not be used together with the
 ///   table-level `primary_key` attribute!
-/// * `#[nanosql(foreign_key = OtherTable::some_column)]` or
-///   `#[nanosql(fk("OtherTable" => "some_column"))]`: defines a foreign key
-///   relationship between this column and another column of a different table.
-///   (The table on the other side may also be this table, for representing a
-///   hierarchy.) You can specify multiple foreign key columns.
-/// * `#[nanosql(index(unique, desc, where = "predicate"))]`: adds an explicit
-///   index on this column with the specified ordering direction. If direction
-///   is omitted, it defaults to `asc`ending.
+/// * ```text
+///   #[nanosql(foreign_key = OtherTable::some_column)]
+///   ```
+///   or
+///   ```text
+///   #[nanosql(fk("OtherTable" => "some_column"))]
+///   ```
+///   Defines a foreign key relationship between this column and another column
+///   of a different table. (The table on the other side may also be this table,
+///   for representing a hierarchy.) You can specify multiple foreign key columns.
+/// * ```text
+///   #[nanosql(index(unique, desc, where = "predicate"))]
+///   ```
+///   Adds an explicit index on this column with the specified ordering direction.
+///   If direction is omitted, it defaults to `asc`ending.
 ///
 ///   If a `where` clause is included, a partial index will be created with
 ///   the corresponding predicate (bool) expression.
@@ -138,8 +175,30 @@ pub trait Table {
     type InsertInput<'p>: InsertInput<'p, Table = Self>;
 
     /// The subset of columns uniquely identifying a row.
+    ///
+    /// When the trait is `#[derive]`d, this will be:
+    ///
+    /// * either a tuple with as many fields as there are keys in the
+    ///   `PRIMARY KEY` (possibly a 1-tuple), if the primary key is
+    ///   specified at the table level;
+    /// * or a single scalar type if the primary key is specified at
+    ///   the column level.
+    ///
+    /// In both cases, the tuple fields or the scalar will have type
+    /// [`<T_n as AsSqlTy>::Borrowed<'p>`](AsSqlTy::Borrowed), where
+    /// `T_n` is the (Rust) type of the `n`-th field of the PK.
+    ///
     /// If no primary key is declared on the table, this will be
     /// an empty type, i.e., one which can not be instantiated.
+    ///
+    /// When you specify this type manually, it should be a `struct`
+    /// with named (and possibly `#[nanosql(rename)]`d) fields, where
+    /// each (effective) field (and thus, parameter) name corresponds
+    /// to one (effective) column name in the `PRIMARY KEY`, although
+    /// the order of the bind parameters does not necessarily need to
+    /// exactly match the order of the columns in the `PRIMARY KEY`.
+    /// Tuple structs are supported as well, but then you are usually
+    /// better off with the default, automatically-generated PK type.
     type PrimaryKey<'p>;
 
     /// The value-level description of the table.
@@ -363,7 +422,7 @@ impl TableDesc {
         indexes
     }
 
-    /// Returns the set of columns marked as `PRIMARY KEY`.
+    /// Returns the set of column names marked as `PRIMARY KEY`.
     /// If the table has no primary key, returns an empty slice.
     pub fn primary_key_columns(&self) -> &[String] {
         // first, try the table-level PK constraint

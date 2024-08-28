@@ -61,6 +61,14 @@ struct EmptyTuplePk {
     id: u16,
 }
 
+#[derive(Clone, Default, Debug, Param, Table)]
+#[nanosql(pk_ty = (i32,))]
+//~^ ERROR Explicit PK type given to table without a PK
+struct PkTypeWithoutPk {
+    some_attr: i32,
+    my_awesome_column: f64,
+}
+
 /// A table-level primary key must respect `rename` and `rename_all`.
 #[derive(Clone, Default, Debug, Param, Table)]
 #[nanosql(primary_key = [orig_field_name])]
