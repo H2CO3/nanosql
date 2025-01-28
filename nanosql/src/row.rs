@@ -15,7 +15,7 @@ use core::num::{
 };
 use core::hash::Hash;
 use core::ops::{Deref, DerefMut};
-use core::borrow::{Borrow, BorrowMut};
+use std::borrow::{Borrow, BorrowMut, Cow};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::collections::{VecDeque, BinaryHeap, HashSet, HashMap, BTreeSet, BTreeMap};
@@ -413,6 +413,8 @@ impl_result_record_for_primitive!{
     f32,
     f64,
     Box<str>,
+    Rc<str>,
+    Arc<str>,
     String,
     Vec<u8>,
     Value,
@@ -510,6 +512,16 @@ impl_result_record_for_tuple!{
     z => Z;
 }
 
+impl<T> ResultRecord for Cow<'_, T>
+where
+    T: ?Sized + ToOwned,
+    T::Owned: ResultRecord,
+{
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        ResultRecord::from_row(row).map(Cow::Owned)
+    }
+}
+
 impl<T: FromSql> ResultRecord for Option<T> {
     fn from_row(row: &Row<'_>) -> Result<Self> {
         primitive_from_sql(row)
@@ -525,6 +537,18 @@ impl<const N: usize> ResultRecord for [u8; N] {
 impl ResultRecord for Box<[u8]> {
     fn from_row(row: &Row<'_>) -> Result<Self> {
         primitive_from_sql(row).map(Vec::into_boxed_slice)
+    }
+}
+
+impl ResultRecord for Rc<[u8]> {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        primitive_from_sql(row)
+    }
+}
+
+impl ResultRecord for Arc<[u8]> {
+    fn from_row(row: &Row<'_>) -> Result<Self> {
+        primitive_from_sql(row)
     }
 }
 
