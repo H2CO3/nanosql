@@ -29,14 +29,22 @@ pub fn add_bounds(
         Fields::Named(fields) => {
             fields.named
                 .iter()
-                .map(|field| &field.ty)
-                .collect()
+                .map(|field| -> Result<_, Error> {
+                    let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+                    Ok(if attrs.ignore { None } else { Some(&field.ty) })
+                })
+                .filter_map(Result::transpose)
+                .collect::<Result<_, _>>()?
         }
         Fields::Unnamed(fields) => {
             fields.unnamed
                 .iter()
-                .map(|field| &field.ty)
-                .collect()
+                .map(|field| -> Result<_, Error> {
+                    let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+                    Ok(if attrs.ignore { None } else { Some(&field.ty) })
+                })
+                .filter_map(Result::transpose)
+                .collect::<Result<_, _>>()?
         }
     };
 
@@ -151,6 +159,11 @@ pub struct FieldAttributes {
     /// For `#[derive(Table)]`: specifies that the column should be
     /// generated based on some expression involving other columns.
     pub generated: Option<GeneratedColumnSpec>,
+    /// For `#[derive(Table, Param, ResultRecord)]`: do not serialize or
+    /// deserialize this field. It will be skipped when binding parameters,
+    /// and its default value will be used when retrieving the result set.
+    #[deluxe(alias = skip, default = false)]
+    pub ignore: bool,
 }
 
 /// Ensures that an SQL expression that is going to be interpolated

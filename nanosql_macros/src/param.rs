@@ -34,11 +34,11 @@ fn expand_struct(
     let (body, prefix) = match &data.fields {
         Fields::Named(fields) => expand_named_fields(fields, &attrs)?,
         Fields::Unnamed(fields) => expand_unnamed_fields(fields, &attrs)?,
-        Fields::Unit => (TokenStream::new(), ParamPrefix::Question),
+        Fields::Unit => (Vec::new(), ParamPrefix::Question),
     };
 
     let ty_name = &input.ident;
-    let num_fields = data.fields.len();
+    let num_fields = body.len();
 
     Ok(quote!{
         impl #impl_gen ::nanosql::Param for #ty_name #ty_gen #where_clause {
@@ -54,7 +54,7 @@ fn expand_struct(
                     );
                 }
 
-                #body
+                #(#body)*
 
                 ::nanosql::Result::Ok(())
             }
@@ -65,7 +65,7 @@ fn expand_struct(
 fn expand_named_fields(
     fields: &FieldsNamed,
     attrs: &ContainerAttributes,
-) -> Result<(TokenStream, ParamPrefix), Error> {
+) -> Result<(Vec<TokenStream>, ParamPrefix), Error> {
     let prefix = attrs.param_prefix.unwrap_or(ParamPrefix::Dollar);
 
     match prefix {
@@ -86,6 +86,10 @@ fn expand_named_fields(
                 Error::new_spanned(field, "named field has no name")
             })?;
 
+            if field_attrs.ignore {
+                return Ok(None);
+            }
+
             // If the field name is a raw identifier, still use just the non-raw
             // part for naming the parameter, because that's what people expect.
             // However, still use the original field name in the field access
@@ -98,13 +102,16 @@ fn expand_named_fields(
                 format!("{prefix}{literal_field_name}")
             };
 
-            Ok(quote!{
+            let ts = quote!{
                 let index = statement.parameter_index(#param_name)?;
                 let index = index.ok_or(::nanosql::Error::unknown_param(#param_name))?;
                 statement.raw_bind_parameter(index, &self.#field_name)?;
-            })
+            };
+
+            Ok(Some(ts))
         })
-        .collect::<Result<TokenStream, Error>>()?;
+        .flat_map(Result::transpose)
+        .collect::<Result<_, Error>>()?;
 
     Ok((body, prefix))
 }
@@ -112,7 +119,7 @@ fn expand_named_fields(
 fn expand_unnamed_fields(
     fields: &FieldsUnnamed,
     attrs: &ContainerAttributes,
-) -> Result<(TokenStream, ParamPrefix), Error> {
+) -> Result<(Vec<TokenStream>, ParamPrefix), Error> {
     let prefix = attrs.param_prefix.unwrap_or(ParamPrefix::Question);
 
     match prefix {
@@ -127,19 +134,26 @@ fn expand_unnamed_fields(
 
     let body = fields.unnamed
         .iter()
-        .enumerate()
-        .map(|(idx, field)| {
+        .enumerate() // this call to enumerate counts fields...
+        .map(|(idx, field)| -> Result<_, Error> {
+            let field_attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+
+            Ok(if field_attrs.ignore { None } else { Some((idx, field)) })
+        })
+        .filter_map(Result::transpose)
+        .zip(1_usize..) // ...while this one counts (1-based) parameters
+        .map(|(field_spec, param_idx)| {
+            let (field_idx, field) = field_spec?;
             let field_name = syn::Index {
-                index: idx as u32,
+                index: field_idx as u32,
                 span: field.span(),
             };
 
             Ok(quote!{
-                // unlike columns, parameter indexes are one-based
-                statement.raw_bind_parameter(#idx + 1, &self.#field_name)?;
+                statement.raw_bind_parameter(#param_idx, &self.#field_name)?;
             })
         })
-        .collect::<Result<TokenStream, Error>>()?;
+        .collect::<Result<_, Error>>()?;
 
     Ok((body, prefix))
 }
