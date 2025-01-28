@@ -1,6 +1,6 @@
 [package]
 name = "nanosql"
-version = "0.9.1"
+version = "0.10.0"
 edition = "2021"
 authors = ["Arpad Goretity 'H2CO3' <arpad.goretity@gmail.com>"]
 description = "Tiny, strongly-typed data mapper for SQLite"
@@ -10,17 +10,17 @@ homepage = "https://h2co3.github.io/nanosql"
 repository = "https://github.com/H2CO3/nanosql"
 
 [dependencies]
-rusqlite = { version = "0.32.1", features = ["modern_sqlite"] }
-thiserror = "1.0.63"
-ordered-float = { version = "4.2.2", optional = true }
-chrono = { version = "0.4.38", optional = true }
+rusqlite = { version = "0.33", features = ["modern_sqlite"] }
+thiserror = "2.0"
+ordered-float = { version = "4.6", optional = true }
+chrono = { version = "0.4", optional = true }
 uuid = { version = "1.10.0", optional = true }
 serde_json = { version = "1.0.127", optional = true }
 ptree = { version = "0.5.0", optional = true, default-features = false }
-nanosql_macros = { path = "../nanosql_macros", version = "0.9.1", optional = true }
+nanosql_macros = { path = "../nanosql_macros", version = "0.10.0", optional = true }
 
 [dev-dependencies]
-compiletest_rs = "0.11.0"
+compiletest_rs = "0.11.2"
 
 [features]
 default = ["derive", "expr-check"]

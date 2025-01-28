@@ -181,7 +181,9 @@ impl SqlExprStr {
         // ensure there isn't any trailing junk
         parser
             .expect_token(&sqlparser::tokenizer::Token::EOF)
-            .map_err(|sqlerr| Error::new_spanned(fragment, sqlerr))
+            .map_err(|sqlerr| Error::new_spanned(fragment, sqlerr))?;
+
+        Ok(())
     }
 }
 
