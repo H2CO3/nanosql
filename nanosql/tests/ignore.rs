@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use nanosql::{define_query, Result, Error, Connection, ConnectionExt};
+use std::rc::Rc;
+use nanosql::{define_query, Result, Connection, ConnectionExt, Single};
 use nanosql::{Table, Param, ResultRecord, AsSqlTy, ToSql, FromSql};
 
 
@@ -51,9 +52,40 @@ struct IgnoredParamLastUnnamed(f64, #[nanosql(ignore)] DoesNotImplementDefaultOr
 #[derive(Clone, Debug, Param)]
 struct IgnoredParamManyUnnamed<'p>(
     &'p str,
-    #[nanosql(ignore)] DoesNotImplementDefaultOrToSqlOrParam,
+    // test the `skip` alias as well
+    #[nanosql(skip)] DoesNotImplementDefaultOrToSqlOrParam,
     #[nanosql(ignore)] Cow<'static, str>,
     u16,
+);
+
+#[derive(Clone, PartialEq, Eq, Debug, ResultRecord)]
+struct IgnoredResultRecordFirstNamed {
+    #[nanosql(ignore)]
+    this_is_default: Vec<DoesNotImplementDefaultOrToSqlOrParam>,
+    brand: Box<str>,
+    #[nanosql(rename = ident)]
+    id: Cow<'static, str>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, ResultRecord)]
+struct IgnoredResultRecordManyNamed {
+    #[nanosql(rename = "power_draw_watt")]
+    power_draw: usize,
+    #[nanosql(ignore)]
+    ignore_middle_1: Option<u64>,
+    #[nanosql(skip)]
+    power_draw_watt: NotFromSqlButDefault, // tricky potential name collision
+    #[nanosql(rename = "brand")]
+    label: Rc<str>,
+}
+
+#[derive(PartialEq, Debug, ResultRecord)]
+struct IgnoreResultRecordUnnamed(
+    #[nanosql(ignore)] u32,
+    String,
+    #[nanosql(ignore)] NotFromSqlButDefault,
+    Box<str>,
+    #[nanosql(ignore)] i64,
 );
 
 define_query!{
@@ -120,6 +152,36 @@ define_query!{
             power_draw_watt <= ?2
           AND
             brand = ?1
+        ORDER BY name
+        "#
+    }
+    ApplianceNamesAndBrands<'p>: () => Vec<IgnoredResultRecordFirstNamed> {
+        r#"
+        SELECT
+            name AS ident,
+            brand AS brand
+        FROM appliance
+        ORDER BY brand, name DESC
+        "#
+    }
+    BrandAndPowerByName<'lt>: &'lt str => Single<IgnoredResultRecordManyNamed> {
+        r#"
+        SELECT
+            brand AS brand,
+            power_draw_watt AS power_draw_watt
+        FROM appliance
+        WHERE name = ?1
+        ORDER BY name
+        LIMIT 1
+        "#
+    }
+    NamesByCaseInsensitiveBrand<'b>: &'b str => Vec<IgnoreResultRecordUnnamed> {
+        r#"
+        SELECT
+            brand AS brand,
+            name AS name
+        FROM appliance
+        WHERE brand LIKE ?1
         ORDER BY name
         "#
     }
@@ -247,6 +309,70 @@ fn ignored_param_unnamed() -> Result<()> {
         )
     )?;
     assert_eq!(names, vec!["television"]);
+
+    Ok(())
+}
+
+#[test]
+fn ignored_resultrecord_named() -> Result<()> {
+    let conn = setup()?;
+
+    let appls = conn.compile_invoke(ApplianceNamesAndBrands, ())?;
+    assert_eq!(appls, vec![
+        IgnoredResultRecordFirstNamed {
+            this_is_default: Vec::new(),
+            brand: Box::from("Bosch"),
+            id: Cow::Owned("vacuum cleaner".to_string()),
+        },
+        IgnoredResultRecordFirstNamed {
+            this_is_default: vec![],
+            brand: Box::from("Jura"),
+            id: Cow::Borrowed("espresso machine"),
+        },
+        IgnoredResultRecordFirstNamed {
+            this_is_default: vec![DoesNotImplementDefaultOrToSqlOrParam; 0],
+            brand: Box::from("LG"),
+            id: Cow::Owned("washing machine".to_owned()),
+        },
+        IgnoredResultRecordFirstNamed {
+            this_is_default: Vec::new(),
+            brand: Box::from("LG"),
+            id: Cow::from("television"),
+        },
+    ]);
+
+    let Single(appl) = conn.compile_invoke(BrandAndPowerByName, "vacuum cleaner")?;
+    assert_eq!(appl, IgnoredResultRecordManyNamed {
+        power_draw: 800,
+        ignore_middle_1: None,
+        power_draw_watt: NotFromSqlButDefault,
+        label: Rc::from("Bosch"),
+    });
+
+    Ok(())
+}
+
+#[test]
+fn ignored_resultrecord_unnamed() -> Result<()> {
+    let conn = setup()?;
+    let appls = conn.compile_invoke(NamesByCaseInsensitiveBrand, "lg")?;
+
+    assert_eq!(appls, vec![
+        IgnoreResultRecordUnnamed(
+            0_u32,
+            String::from("LG"),
+            NotFromSqlButDefault,
+            Box::from("television"),
+            0_i64,
+        ),
+        IgnoreResultRecordUnnamed(
+            0_u32,
+            String::from("LG"),
+            NotFromSqlButDefault,
+            Box::from("washing machine"),
+            0_i64,
+        ),
+    ]);
 
     Ok(())
 }

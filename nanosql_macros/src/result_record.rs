@@ -30,21 +30,19 @@ fn expand_struct(
     let bounds_for_ignored = parse_quote!(::core::default::Default);
     let where_clause = add_bounds(&data.fields, where_clause, bounds, Some(bounds_for_ignored))?;
 
-    let body = match &data.fields {
+    let (body, num_columns) = match &data.fields {
         Fields::Named(fields) => expand_named_fields(fields, &attrs)?,
-        Fields::Unnamed(fields) => expand_unnamed_fields(fields, &attrs),
-        Fields::Unit => quote!(Self),
+        Fields::Unnamed(fields) => expand_unnamed_fields(fields, &attrs)?,
+        Fields::Unit => (quote!(Self), 0),
     };
-
     let ty_name = &input.ident;
-    let num_fields = data.fields.len();
 
     Ok(quote!{
         impl #impl_gen ::nanosql::ResultRecord for #ty_name #ty_gen #where_clause {
             fn from_row(row: &::nanosql::Row<'_>) -> ::nanosql::Result<Self> {
                 let statement: &::nanosql::Statement = row.as_ref();
                 let actual = statement.column_count();
-                let expected = #num_fields;
+                let expected = #num_columns;
 
                 if actual != expected {
                     return ::nanosql::Result::Err(
@@ -61,9 +59,10 @@ fn expand_struct(
 fn expand_named_fields(
     fields: &FieldsNamed,
     attrs: &ContainerAttributes,
-) -> Result<TokenStream, Error> {
+) -> Result<(TokenStream, usize), Error> {
     let mut field_names = Vec::with_capacity(fields.named.len());
-    let mut column_names = Vec::with_capacity(fields.named.len());
+    let mut field_ctors = Vec::with_capacity(fields.named.len());
+    let mut num_columns = 0;
 
     for field in &fields.named {
         let field_attrs: FieldAttributes = deluxe::parse_attributes(field)?;
@@ -71,37 +70,60 @@ fn expand_named_fields(
             Error::new_spanned(field, "named field has no name")
         })?;
 
-        // If the field name is a raw identifier, still only use the non-raw
-        // part for naming the column, because that's what people expect.
-        // However, still use the original field name in the field access
-        // expression, otherwise raw identifiers would cause a syntax error.
-        let column_name = field_attrs.rename
-            .as_ref()
-            .map_or_else(
-                || attrs.rename_all.display(field_name).to_string(),
-                <_>::to_string,
-            );
-
         field_names.push(field_name);
-        column_names.push(column_name);
+
+        if field_attrs.ignore {
+            field_ctors.push(quote!(::core::default::Default::default()));
+        } else {
+            // If the field name is a raw identifier, still only use the non-raw
+            // part for naming the column, because that's what people expect.
+            // However, still use the original field name in the field access
+            // expression, otherwise raw identifiers would cause a syntax error.
+            let column_name = field_attrs.rename
+                .as_ref()
+                .map_or_else(
+                    || attrs.rename_all.display(field_name).to_string(),
+                    <_>::to_string,
+                );
+
+            field_ctors.push(quote!(row.get(#column_name)?));
+            num_columns += 1;
+        }
     }
 
-    Ok(quote!{
+    let ts = quote!{
         Self {
-            #(#field_names: row.get(#column_names)?,)*
+            #(#field_names: #field_ctors,)*
         }
-    })
+    };
+
+    Ok((ts, num_columns))
 }
 
 fn expand_unnamed_fields(
     fields: &FieldsUnnamed,
     _attrs: &ContainerAttributes,
-) -> TokenStream {
-    let field_ctors = (0..fields.unnamed.len()).map(|idx| quote!{ row.get(#idx)? });
+) -> Result<(TokenStream, usize), Error> {
+    let mut field_ctors: Vec<TokenStream> = Vec::with_capacity(fields.unnamed.len());
+    let mut idx = 0; // columns are 0-indexed
 
-    quote!{
-        Self(#(#field_ctors,)*)
+    for field in &fields.unnamed {
+        let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+
+        field_ctors.push(if attrs.ignore {
+            quote!(::core::default::Default::default())
+        } else {
+            quote!(row.get(#idx)?)
+        });
+
+        idx += usize::from(!attrs.ignore);
     }
+
+    let ts = quote!{
+        Self(#(#field_ctors,)*)
+    };
+
+    Ok((ts, idx))
 }
 
 /// Implements the bulk of the logic for an `enum` with all unit-like variants.
