@@ -20,9 +20,6 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     }
 }
 
-/// TODO(H2CO3): respect a field-level `ignore` or `transparent` attribute,
-/// for selecting exactly one of >1 fields to base the impl on (either by
-/// ignoring all but one of them, or by marking exactly one as transparent).
 fn expand_struct(
     input: &DeriveInput,
     _attrs: ContainerAttributes,
@@ -39,7 +36,13 @@ fn expand_struct(
         }
     };
 
-    let mut iter = fields.iter();
+    let mut iter = fields
+        .iter()
+        .map(|field| -> Result<_, Error> {
+            let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+            Ok(if attrs.ignore { None } else { Some(field) })
+        })
+        .filter_map(Result::transpose);
 
     let (Some(field), None) = (iter.next(), iter.next()) else {
         return Err(Error::new_spanned(
@@ -47,10 +50,11 @@ fn expand_struct(
             "deriving `AsSqlTy` on a struct is only allowed for a newtype with exactly one field"
         ));
     };
+    let field = field?;
     let ty_name = &input.ident;
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
     let bounds = parse_quote!(::nanosql::AsSqlTy);
-    let where_clause = add_bounds(&data.fields, where_clause, bounds)?;
+    let where_clause = add_bounds(&data.fields, where_clause, bounds, None)?;
     let field_ty = &field.ty;
 
     Ok(quote!{

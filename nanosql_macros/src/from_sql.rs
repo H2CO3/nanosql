@@ -39,30 +39,54 @@ fn expand_struct(
         }
     };
 
-    let mut iter = fields.iter();
+    let mut iter = fields
+        .iter()
+        .enumerate()
+        .map(|(idx, field)| -> Result<_, Error> {
+            let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+            Ok(if attrs.ignore { None } else { Some((idx, field)) })
+        })
+        .filter_map(Result::transpose);
 
-    let (Some(field), None) = (iter.next(), iter.next()) else {
+    let (Some(field_spec), None) = (iter.next(), iter.next()) else {
         return Err(Error::new_spanned(
             fields,
             "deriving `FromSql` on a struct is only allowed for a newtype with exactly one field"
         ));
     };
+    let (payload_index, field) = field_spec?;
     let ty_name = &input.ident;
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
     let bounds = parse_quote!(::nanosql::FromSql);
-    let where_clause = add_bounds(&data.fields, where_clause, bounds)?;
+    let bounds_for_ignored = parse_quote!(::core::default::Default);
+    let where_clause = add_bounds(&data.fields, where_clause, bounds, Some(bounds_for_ignored))?;
 
-    let body = if let Some(field_name) = field.ident.as_ref() {
+    let body = if let Some(payload_name) = field.ident.as_ref() {
+        let field_ctors = fields
+            .iter()
+            .map(|f| {
+                let name = f.ident.as_ref().expect("named field is unnamed?!");
+                if name == payload_name {
+                    quote!(#name: ::nanosql::FromSql::column_result(value)?)
+                } else {
+                    quote!(#name: ::core::default::Default::default())
+                }
+            });
+
         quote!{
-            ::nanosql::FromSqlResult::Ok(#ty_name {
-                #field_name: ::nanosql::FromSql::column_result(value)?
-            })
+            ::nanosql::FromSqlResult::Ok(#ty_name { #(#field_ctors,)* })
         }
     } else {
+        let field_ctors = (0..fields.len()).map(|i| {
+            if i == payload_index {
+                quote!(::nanosql::FromSql::column_result(value)?)
+            } else {
+                quote!(::core::default::Default::default())
+            }
+        });
+
         quote!{
-            ::nanosql::FromSqlResult::Ok(
-                #ty_name(::nanosql::FromSql::column_result(value)?)
-            )
+            ::nanosql::FromSqlResult::Ok(#ty_name(#(#field_ctors,)*))
         }
     };
 

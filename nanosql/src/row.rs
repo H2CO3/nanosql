@@ -358,8 +358,8 @@ where
 /// This trait describes types that deserialize from a single row (tuple).
 ///
 /// When derived on a `struct`, the `rename_all` (type-level) and `rename`
-/// (field-level) attributes work identically to those of [`Table`](crate::table::Table);
-/// see its documentation for more details.
+/// and `ignore` (field-level) attributes work identically to those of
+/// [`Table`](crate::table::Table); see its documentation for more details.
 pub trait ResultRecord: Sized {
     /// Convert a dynamically-typed relational tuple to a statically-typed record.
     fn from_row(row: &Row<'_>) -> Result<Self>;

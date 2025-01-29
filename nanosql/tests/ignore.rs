@@ -1,10 +1,13 @@
 use std::borrow::Cow;
-use nanosql::{define_query, Result, Error};
-use nanosql::{Table, Param, ResultRecord, Connection, ConnectionExt};
+use nanosql::{define_query, Result, Error, Connection, ConnectionExt};
+use nanosql::{Table, Param, ResultRecord, AsSqlTy, ToSql, FromSql};
 
 
-#[derive(Copy, Clone, Debug)]
-struct DoesNotImplementToSqlOrParam;
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct DoesNotImplementDefaultOrToSqlOrParam;
+
+#[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
+struct NotFromSqlButDefault;
 
 #[derive(Clone, PartialEq, Eq, Debug, Table, Param, ResultRecord)]
 struct Appliance {
@@ -25,7 +28,7 @@ struct IgnoredParamFirstNamed<'a> {
 struct IgnoredParamLastNamed {
     brand: &'static str,
     #[nanosql(ignore)]
-    trailing_junk: Vec<DoesNotImplementToSqlOrParam>,
+    trailing_junk: Vec<DoesNotImplementDefaultOrToSqlOrParam>,
 }
 
 #[derive(Clone, Debug, Param)]
@@ -40,15 +43,15 @@ struct IgnoredParamManyNamed {
 }
 
 #[derive(Clone, Copy, Debug, Param)]
-struct IgnoredParamFirstUnnamed(#[nanosql(ignore)] DoesNotImplementToSqlOrParam, u32);
+struct IgnoredParamFirstUnnamed(#[nanosql(ignore)] DoesNotImplementDefaultOrToSqlOrParam, u32);
 
 #[derive(Clone, Copy, Debug, Param)]
-struct IgnoredParamLastUnnamed(f64, #[nanosql(ignore)] DoesNotImplementToSqlOrParam);
+struct IgnoredParamLastUnnamed(f64, #[nanosql(ignore)] DoesNotImplementDefaultOrToSqlOrParam);
 
 #[derive(Clone, Debug, Param)]
 struct IgnoredParamManyUnnamed<'p>(
     &'p str,
-    #[nanosql(ignore)] DoesNotImplementToSqlOrParam,
+    #[nanosql(ignore)] DoesNotImplementDefaultOrToSqlOrParam,
     #[nanosql(ignore)] Cow<'static, str>,
     u16,
 );
@@ -173,7 +176,7 @@ fn ignored_param_named() -> Result<()> {
 
     let apps3 = conn.compile_invoke(ApplianceByBrand, IgnoredParamLastNamed {
         brand: "LG",
-        trailing_junk: vec![DoesNotImplementToSqlOrParam],
+        trailing_junk: vec![DoesNotImplementDefaultOrToSqlOrParam],
     })?;
     assert_eq!(apps3.len(), 2);
     assert_eq!(apps3[0].name, "television");
@@ -182,9 +185,9 @@ fn ignored_param_named() -> Result<()> {
     let apps4 = conn.compile_invoke(ApplianceByBrand, IgnoredParamLastNamed {
         brand: "Jura",
         trailing_junk: vec![
-            DoesNotImplementToSqlOrParam,
-            DoesNotImplementToSqlOrParam,
-            DoesNotImplementToSqlOrParam,
+            DoesNotImplementDefaultOrToSqlOrParam,
+            DoesNotImplementDefaultOrToSqlOrParam,
+            DoesNotImplementDefaultOrToSqlOrParam,
         ],
     })?;
     assert_eq!(apps4, vec![app2]);
@@ -192,8 +195,8 @@ fn ignored_param_named() -> Result<()> {
     let apps5 = conn.compile_invoke(ApplianceByBrand, IgnoredParamLastNamed {
         brand: "Electrolux",
         trailing_junk: vec![
-            DoesNotImplementToSqlOrParam,
-            DoesNotImplementToSqlOrParam,
+            DoesNotImplementDefaultOrToSqlOrParam,
+            DoesNotImplementDefaultOrToSqlOrParam,
         ],
     })?;
     assert_eq!(apps5, []);
@@ -218,7 +221,7 @@ fn ignored_param_unnamed() -> Result<()> {
 
     let apps = conn.compile_invoke(
         ApplianceByMinPowerDraw,
-        IgnoredParamFirstUnnamed(DoesNotImplementToSqlOrParam, 1000),
+        IgnoredParamFirstUnnamed(DoesNotImplementDefaultOrToSqlOrParam, 1000),
     )?;
     assert_eq!(apps.len(), 2);
     assert_eq!(apps[0].name, "espresso machine");
@@ -230,7 +233,7 @@ fn ignored_param_unnamed() -> Result<()> {
 
     let brands = conn.compile_invoke(
         BrandsByPowerDraw,
-        IgnoredParamLastUnnamed(800.0, DoesNotImplementToSqlOrParam),
+        IgnoredParamLastUnnamed(800.0, DoesNotImplementDefaultOrToSqlOrParam),
     )?;
     assert_eq!(brands, vec!["Bosch"]);
 
@@ -238,12 +241,177 @@ fn ignored_param_unnamed() -> Result<()> {
         ApplianceNamesByBrandAndMaxPower,
         IgnoredParamManyUnnamed(
             "LG",
-            DoesNotImplementToSqlOrParam,
+            DoesNotImplementDefaultOrToSqlOrParam,
             Cow::Borrowed("Bosch"), // should be ignored
             1500,
         )
     )?;
     assert_eq!(names, vec!["television"]);
+
+    Ok(())
+}
+
+fn assert_as_sql_ty<T, U>()
+where
+    T: AsSqlTy,
+    for<'p> U: AsSqlTy<Borrowed<'p> = T::Borrowed<'p>>,
+{
+    assert_eq!(T::SQL_TY, U::SQL_TY);
+}
+
+#[test]
+fn ignored_assqlty_named() {
+    #[derive(Debug, AsSqlTy)]
+    struct Test {
+        #[nanosql(ignore)]
+        first_ignored: String,
+        payload: i64,
+        #[nanosql(ignore)]
+        second_ignored: DoesNotImplementDefaultOrToSqlOrParam,
+    }
+
+    assert_as_sql_ty::<Test, i64>();
+}
+
+#[test]
+fn ignored_assqlty_unnamed() {
+    #[derive(Debug, AsSqlTy)]
+    struct Test(
+        #[nanosql(ignore)] DoesNotImplementDefaultOrToSqlOrParam,
+        Box<str>,
+        #[nanosql(ignore)] Cow<'static, [u8]>,
+    );
+
+    assert_as_sql_ty::<Test, Box<str>>();
+}
+
+#[test]
+fn ignored_tosql_named() -> Result<()> {
+    #[derive(ToSql)]
+    struct Test<'lt> {
+        #[nanosql(ignore)]
+        foo: DoesNotImplementDefaultOrToSqlOrParam,
+        payload: &'lt str,
+        #[nanosql(ignore)]
+        bar: u32,
+    }
+
+    let payload = "the only non-ignored field";
+    let test = Test { payload, foo: DoesNotImplementDefaultOrToSqlOrParam, bar: 192837 };
+
+    assert_eq!(test.to_sql()?, payload.to_sql()?);
+
+    Ok(())
+}
+
+#[test]
+fn ignored_tosql_unnamed() -> Result<()> {
+    #[derive(ToSql)]
+    struct Test<T, U>(
+        #[nanosql(ignore)]
+        T,
+        U,
+        #[nanosql(ignore)]
+        DoesNotImplementDefaultOrToSqlOrParam,
+    );
+
+    let payload = b"value for ToSql";
+    let test = Test(1337_i64, payload, DoesNotImplementDefaultOrToSqlOrParam);
+
+    assert_eq!(test.to_sql()?, payload.to_sql()?);
+
+    Ok(())
+}
+
+#[test]
+fn ignored_fromsql_named() -> Result<()> {
+    #[derive(PartialEq, Debug, FromSql)]
+    struct Test1 {
+        #[nanosql(ignore)]
+        empty: String,
+        useful: String,
+    }
+
+    #[derive(PartialEq, Debug, FromSql)]
+    struct Test2 {
+        real_content: i16,
+        #[nanosql(ignore)]
+        other_number: u32,
+        #[nanosql(ignore)]
+        empty_blob: Vec<u8>,
+    }
+
+    #[derive(PartialEq, Debug, FromSql)]
+    struct Test3 {
+        #[nanosql(ignore)]
+        leading_junk: NotFromSqlButDefault,
+        actual_data: [u8; 10],
+        #[nanosql(ignore)]
+        trailing_junk: Option<DoesNotImplementDefaultOrToSqlOrParam>,
+    }
+
+    let content = "this is the expected content";
+    let test1 = Test1::column_result(content.into())?;
+    assert_eq!(test1, Test1 {
+        empty: String::default(),
+        useful: content.to_owned(),
+    });
+
+    let test2 = Test2::column_result(nanosql::ValueRef::Integer(-7331))?;
+    assert_eq!(test2, Test2 {
+        real_content: -7331,
+        other_number: 0,
+        empty_blob: vec![],
+    });
+
+    let test3 = Test3::column_result(nanosql::ValueRef::Blob(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))?;
+    assert_eq!(test3, Test3 {
+        leading_junk: NotFromSqlButDefault,
+        actual_data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        trailing_junk: None,
+    });
+
+    Ok(())
+}
+
+#[test]
+fn ignored_fromsql_unnamed() -> Result<()> {
+    #[derive(PartialEq, Debug, FromSql)]
+    struct Test1(
+        #[nanosql(ignore)] String,
+        String,
+    );
+
+    #[derive(PartialEq, Debug, FromSql)]
+    struct Test2(
+        i16,
+        #[nanosql(ignore)] u32,
+        #[nanosql(ignore)] Box<[u8]>,
+    );
+
+    #[derive(PartialEq, Debug, FromSql)]
+    struct Test3(
+        #[nanosql(ignore)] Option<DoesNotImplementDefaultOrToSqlOrParam>,
+        [u8; 10],
+        #[nanosql(ignore)] NotFromSqlButDefault,
+    );
+
+    let content = "let's see some more text";
+    let test1 = Test1::column_result(content.into())?;
+    assert_eq!(test1, Test1(String::new(), content.to_string()));
+
+    let test2 = Test2::column_result(nanosql::ValueRef::Integer(-7331))?;
+    assert_eq!(test2, Test2(-7331, 0, Box::new([])));
+
+    let test3 = Test3::column_result(nanosql::ValueRef::Blob(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]))?;
+    assert_eq!(
+        test3,
+        Test3(
+            None,
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+            NotFromSqlButDefault,
+        ),
+    );
 
     Ok(())
 }

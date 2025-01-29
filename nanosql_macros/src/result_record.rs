@@ -27,7 +27,8 @@ fn expand_struct(
 ) -> Result<TokenStream, Error> {
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
     let bounds = parse_quote!(::nanosql::FromSql);
-    let where_clause = add_bounds(&data.fields, where_clause, bounds)?;
+    let bounds_for_ignored = parse_quote!(::core::default::Default);
+    let where_clause = add_bounds(&data.fields, where_clause, bounds, Some(bounds_for_ignored))?;
 
     let body = match &data.fields {
         Fields::Named(fields) => expand_named_fields(fields, &attrs)?,

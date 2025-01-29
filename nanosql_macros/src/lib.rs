@@ -38,6 +38,8 @@ pub fn derive_insert_input(ts: TokenStream) -> TokenStream {
 
 /// The purpose of this derive macro is to implement the `rusqlite::ToSql`
 /// trait for `enum`s (with unit variants only) and newtype wrapper `struct`s.
+/// Multi-field `struct`s can use the `#[nanosql(ignore)]` attribute on all
+/// except one field, in order to delegate the impl to that one field.
 ///
 /// When derived on an `enum`, the `rename_all` (type-level) and `rename`
 /// (variant-level) attributes work in the same manner as those of `Table`.
@@ -49,6 +51,8 @@ pub fn derive_to_sql(ts: TokenStream) -> TokenStream {
 
 /// The purpose of this derive macro is to implement the `rusqlite::FromSql`
 /// trait for `enum`s (with unit variants only) and newtype wrapper `struct`s.
+/// Multi-field `struct`s can use the `#[nanosql(ignore)]` attribute on all
+/// except one field, in order to delegate the impl to that one field.
 ///
 /// When derived on an `enum`, the `rename_all` (type-level) and `rename`
 /// (variant-level) attributes work in the same manner as those of `Table`.

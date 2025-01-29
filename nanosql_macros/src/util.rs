@@ -23,28 +23,35 @@ pub fn add_bounds(
     fields: &Fields,
     where_clause: Option<&WhereClause>,
     bounds: Punctuated<TypeParamBound, Token![+]>,
+    bounds_for_ignored: Option<Punctuated<TypeParamBound, Token![+]>>,
 ) -> Result<WhereClause, Error> {
-    let unique_types: HashSet<_> = match fields {
-        Fields::Unit => HashSet::new(),
+    // we use two separate sets, as this allows us to de-duplicate
+    // types, yet still subject the same type to both the regular
+    // and the "ignored" bounds (usually, Default) simultaneously.
+    let mut uniq_types_for_bounds = HashSet::with_capacity(fields.len());
+    let mut uniq_types_for_ignored = HashSet::with_capacity(fields.len());
+
+    match fields {
+        Fields::Unit => {}
         Fields::Named(fields) => {
-            fields.named
-                .iter()
-                .map(|field| -> Result<_, Error> {
-                    let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
-                    Ok(if attrs.ignore { None } else { Some(&field.ty) })
-                })
-                .filter_map(Result::transpose)
-                .collect::<Result<_, _>>()?
+            for field in &fields.named {
+                let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+                if attrs.ignore {
+                    uniq_types_for_ignored.insert(&field.ty);
+                } else {
+                    uniq_types_for_bounds.insert(&field.ty);
+                }
+            }
         }
         Fields::Unnamed(fields) => {
-            fields.unnamed
-                .iter()
-                .map(|field| -> Result<_, Error> {
-                    let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
-                    Ok(if attrs.ignore { None } else { Some(&field.ty) })
-                })
-                .filter_map(Result::transpose)
-                .collect::<Result<_, _>>()?
+            for field in &fields.unnamed {
+                let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+                if attrs.ignore {
+                    uniq_types_for_ignored.insert(&field.ty);
+                } else {
+                    uniq_types_for_bounds.insert(&field.ty);
+                }
+            }
         }
     };
 
@@ -56,12 +63,17 @@ pub fn add_bounds(
     });
 
     where_clause.predicates.extend(
-        unique_types.iter().map(|ty| -> WherePredicate {
-            parse_quote!{
-                #ty: #bounds
-            }
+        uniq_types_for_bounds.iter().map(|ty| -> WherePredicate {
+            parse_quote!(#ty: #bounds)
         })
     );
+    if let Some(ignored_bounds) = bounds_for_ignored.as_ref() {
+        where_clause.predicates.extend(
+            uniq_types_for_ignored.iter().map(|ty| -> WherePredicate {
+                parse_quote!(#ty: #ignored_bounds)
+            })
+        );
+    }
 
     Ok(where_clause)
 }

@@ -935,6 +935,8 @@ impl Display for TableConstraint {
 ///
 /// This trait can be automatically derived on `enum`s with only unit
 /// variants, and on newtype structs, along with `ToSql` and `FromSql`.
+/// Structs with multiple fields can specify the `#[nanosql(ignore)]`
+/// attribute on all but one field to forward the impl to that field.
 ///
 /// When derived on an `enum`, the `rename_all` type-level attribute
 /// and the `rename` variant-level attribute work in the same way as
