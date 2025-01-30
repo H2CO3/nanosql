@@ -6,7 +6,7 @@ use syn::ext::IdentExt;
 use quote::quote;
 use deluxe::SpannedValue;
 use crate::util::{
-    ContainerAttributes, FieldAttributes, IdentOrStr, TableIndexSpec, TableForeignKey,
+    ContainerAttributes, FieldAttributes, FieldAndColumn, IdentOrStr, TableIndexSpec, TableForeignKey,
 };
 
 
@@ -54,80 +54,87 @@ fn expand_struct(
     let insert_input_ty = &attrs.insert_input_ty;
     let input_lt = &attrs.input_lt;
 
-    let attrs_for_each_field: Vec<FieldAttributes> = fields.named
+    // first, parse attributes, and upfront remove ignored fields altogether
+    let fields: Vec<_> = fields.named
         .iter()
-        .map(deluxe::parse_attributes)
-        .collect::<Result<_, _>>()?;
-
-    let col_name_str: Vec<_> = fields.named
-        .iter()
-        .zip(&attrs_for_each_field)
-        .map(|(f, field_attrs)| {
-            let field_name = f.ident.as_ref().expect("named field is unnamed?");
-
-            field_attrs.rename
+        .map(|f| -> Result<_, Error> {
+            let field_attrs: FieldAttributes = deluxe::parse_attributes(f)?;
+            let field_name = f.ident.as_ref().ok_or_else(|| {
+                Error::new_spanned(f, "named field is unnamed?")
+            })?;
+            let column_name = field_attrs.rename
                 .as_ref()
                 .map_or_else(
                     || attrs.rename_all.display(field_name).to_string(),
                     <_>::to_string,
-                )
+                );
+
+            let spec = if field_attrs.ignore {
+                None
+            } else {
+                Some(FieldAndColumn {
+                    field: f.clone(),
+                    column_name,
+                    attributes: field_attrs,
+                })
+            };
+
+            Ok(spec)
         })
-        .collect();
+        .filter_map(Result::transpose)
+        .collect::<Result<_, _>>()?;
 
-    validate_primary_key(attrs.primary_key.as_ref(), &attrs_for_each_field, &col_name_str)?;
-    validate_foreign_keys(&attrs.foreign_key, &attrs_for_each_field, &col_name_str)?;
-    validate_indexes(&attrs.index, &attrs_for_each_field, &col_name_str)?;
-    validate_unique_constraints(&attrs.unique, &attrs_for_each_field, &col_name_str)?;
+    validate_primary_key(attrs.primary_key.as_ref(), &fields)?;
+    validate_foreign_keys(&attrs.foreign_key, &fields)?;
+    validate_indexes(&attrs.index, &fields)?;
+    validate_unique_constraints(&attrs.unique, &fields)?;
 
-    let pk_ty = primary_key_type(fields, &attrs, &attrs_for_each_field, &col_name_str)?;
-    let col_ty = fields.named
+    let pk_ty = primary_key_type(&attrs, &fields)?;
+    let col_ty = fields
         .iter()
-        .zip(&attrs_for_each_field)
-        .map(|(f, field_attrs)| {
-            field_attrs.sql_ty.clone().unwrap_or_else(|| f.ty.clone())
+        .map(FieldAndColumn::sql_ty);
+
+    let primary_key = fields
+        .iter()
+        .map(|f| {
+            f.attributes.primary_key.then_some(quote!(.primary_key()))
         });
 
-    let primary_key = attrs_for_each_field
+    let foreign_key = fields
         .iter()
-        .map(|field_attrs| {
-            field_attrs.primary_key.then_some(quote!(.primary_key()))
+        .map(|f| f.attributes.foreign_key.as_ref());
+
+    let index_specs = fields
+        .iter()
+        .map(|f| &f.attributes.index);
+
+    let uniq_constraint = fields
+        .iter()
+        .map(|f| {
+            f.attributes.unique.then_some(quote!(.unique()))
         });
 
-    let foreign_key = attrs_for_each_field
+    let check_constraint = fields
         .iter()
-        .map(|field_attrs| field_attrs.foreign_key.as_ref());
-
-    let index_specs = attrs_for_each_field
-        .iter()
-        .map(|field_attrs| &field_attrs.index);
-
-    let uniq_constraint = attrs_for_each_field
-        .iter()
-        .map(|field_attrs| {
-            field_attrs.unique.then_some(quote!(.unique()))
-        });
-
-    let check_constraint = attrs_for_each_field
-        .iter()
-        .map(|field_attrs| {
-            let constraints = field_attrs.check.as_slice();
+        .map(|f| {
+            let constraints = f.attributes.check.as_slice();
 
             quote!{
                 #(.check(#constraints))*
             }
         });
 
-    let default_value = attrs_for_each_field
+    let default_value = fields
         .iter()
-        .map(|field_attrs| {
-            field_attrs.default.as_ref().map(|expr| {
+        .map(|f| {
+            f.attributes.default.as_ref().map(|expr| {
                 quote!{.default_value(#expr)}
             })
         });
 
-    let generated = attrs_for_each_field
+    let generated = fields
         .iter()
-        .map(|field_attrs| field_attrs.generated.as_ref());
+        .map(|f| f.attributes.generated.as_ref());
 
     let table_primary_key = attrs.primary_key.as_ref().map(|pk| {
         let columns = pk.iter();
@@ -146,6 +153,7 @@ fn expand_struct(
         .iter()
         .map(|expr| quote!(.check(#expr)));
 
+    let col_name_str = fields.iter().map(|f| f.column_name.as_str());
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
 
     Ok(quote!{
@@ -186,11 +194,8 @@ fn expand_struct(
 
 fn validate_primary_key(
     table_pk_cols: Option<&SpannedValue<Vec<IdentOrStr>>>,
-    field_attrs: &[FieldAttributes],
-    all_cols: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
-    assert_eq!(field_attrs.len(), all_cols.len());
-
     // if the table-level PK is declared, check it
     if let Some(table_pk_cols) = table_pk_cols {
         // ensure that there is at least 1 column in the PK
@@ -199,7 +204,10 @@ fn validate_primary_key(
         }
 
         // ensure that columns referenced in the table-level PK do in fact exist
-        if let Some(err_col) = table_pk_cols.iter().find(|col| !all_cols.contains(&col.to_string())) {
+        if let Some(err_col) = table_pk_cols
+            .iter()
+            .find(|&col| fields.iter().all(|f| *col != f.column_name))
+        {
             return Err(Error::new_spanned(
                 err_col,
                 format_args!("unknown column `{err_col}` in primary key")
@@ -216,7 +224,9 @@ fn validate_primary_key(
     }
 
     // always check the field-level PK attributes
-    let mut column_pk_iter = field_attrs.iter().filter(|a| *a.primary_key);
+    let mut column_pk_iter = fields
+        .iter()
+        .filter_map(|f| f.attributes.primary_key.then_some(&f.attributes));
 
     if let Some(column_pk) = column_pk_iter.next() {
         // ensure that a column-level PK does not conflict with the table-level PK
@@ -241,21 +251,17 @@ fn validate_primary_key(
 
 fn validate_foreign_keys(
     table_fk_specs: &[TableForeignKey],
-    field_attrs: &[FieldAttributes],
-    all_cols: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
     table_fk_specs
         .iter()
-        .try_for_each(|fk| validate_one_foreign_key(fk, field_attrs, all_cols))
+        .try_for_each(|fk| validate_one_foreign_key(fk, fields))
 }
 
 fn validate_one_foreign_key(
     table_fk_spec: &TableForeignKey,
-    field_attrs: &[FieldAttributes],
-    all_cols: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
-    assert_eq!(field_attrs.len(), all_cols.len());
-
     // ensure that the foreign key spec contains at least 1 column
     if table_fk_spec.columns.is_empty() {
         return Err(Error::new_spanned(
@@ -268,7 +274,7 @@ fn validate_one_foreign_key(
     if let Some(err_col) = table_fk_spec.columns
         .iter()
         .find_map(|(col, _)| {
-            if all_cols.contains(&col.to_string()) {
+            if fields.iter().any(|f| *col == f.column_name) {
                 None
             } else {
                 Some(col)
@@ -296,27 +302,22 @@ fn validate_one_foreign_key(
 
     // Unlike a PRIMARY KEY, there may be more than one FOREIGN KEY on a table,
     // so we don't need to check for that kind of (non-)conflict. Yay! \o/
-
     Ok(())
 }
 
 fn validate_indexes(
     indexes: &[TableIndexSpec],
-    field_attrs: &[FieldAttributes],
-    all_cols: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
     indexes
         .iter()
-        .try_for_each(|index| validate_one_index(index, field_attrs, all_cols))
+        .try_for_each(|index| validate_one_index(index, fields))
 }
 
 fn validate_one_index(
     index: &TableIndexSpec,
-    field_attrs: &[FieldAttributes],
-    all_cols: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
-    assert_eq!(field_attrs.len(), all_cols.len());
-
     // ensure that the index spec contains at least 1 column
     if index.columns.is_empty() {
         return Err(Error::new_spanned(
@@ -329,7 +330,7 @@ fn validate_one_index(
     if let Some(err_col) = index.columns
         .iter()
         .find_map(|(col, _)| {
-            if all_cols.contains(&col.to_string()) {
+            if fields.iter().any(|f| *col == f.column_name) {
                 None
             } else {
                 Some(col)
@@ -355,21 +356,17 @@ fn validate_one_index(
 
 fn validate_unique_constraints(
     unique_cols: &[SpannedValue<Vec<IdentOrStr>>],
-    field_attrs: &[FieldAttributes],
-    all_cols: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
     unique_cols
         .iter()
-        .try_for_each(|cols| validate_one_unique_constraint(cols, field_attrs, all_cols))
+        .try_for_each(|cols| validate_one_unique_constraint(cols, fields))
 }
 
 fn validate_one_unique_constraint(
     unique_cols: &SpannedValue<Vec<IdentOrStr>>,
-    field_attrs: &[FieldAttributes],
-    all_cols: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
-    assert_eq!(field_attrs.len(), all_cols.len());
-
     // ensure that the foreign key spec contains at least 1 column
     if unique_cols.is_empty() {
         return Err(Error::new_spanned(
@@ -379,7 +376,10 @@ fn validate_one_unique_constraint(
     }
 
     // ensure that the referenced columns do in fact exist
-    if let Some(err_col) = unique_cols.iter().find(|col| !all_cols.contains(&col.to_string())) {
+    if let Some(err_col) = unique_cols
+        .iter()
+        .find(|&col| fields.iter().all(|f| *col != f.column_name))
+    {
         return Err(Error::new_spanned(
             err_col,
             format_args!("unknown column `{err_col}` in unique constraint")
@@ -398,18 +398,12 @@ fn validate_one_unique_constraint(
 }
 
 fn primary_key_type(
-    fields: &FieldsNamed,
     container_attrs: &ContainerAttributes,
-    field_attrs: &[FieldAttributes],
-    col_names: &[String],
+    fields: &[FieldAndColumn],
 ) -> Result<TokenStream, Error> {
-    assert_eq!(fields.named.len(), field_attrs.len());
-    assert_eq!(fields.named.len(), col_names.len());
-
-    let col_pk = fields.named
+    let col_pk = fields
         .iter()
-        .zip(field_attrs)
-        .find(|(_, attrs)| SpannedValue::into_inner(attrs.primary_key));
+        .find(|f| SpannedValue::into_inner(f.attributes.primary_key));
 
     // If the PK type is explicitly specified, simply return it verbatim.
     // Check that the table _actually_ has a PK; disallow if it doesn't.
@@ -422,14 +416,9 @@ fn primary_key_type(
     }
 
     let input_lt = &container_attrs.input_lt;
-    let names_to_sql_types: HashMap<&str, &Type> = fields.named
+    let names_to_sql_types: HashMap<&str, &Type> = fields
         .iter()
-        .zip(field_attrs)
-        .zip(col_names)
-        .map(|((field, attrs), name)| {
-            // respect `#[nanosql(sql_ty = "...")]` attribute
-            (name.as_str(), attrs.sql_ty.as_ref().unwrap_or(&field.ty))
-        })
+        .map(|f| (f.column_name.as_str(), f.sql_ty()))
         .collect();
 
     if let Some(pk_cols) = container_attrs.primary_key.as_ref() {
@@ -449,9 +438,8 @@ fn primary_key_type(
         Ok(quote!{
             (#(#types,)*)
         })
-    } else if let Some((field, attrs)) = col_pk {
-        // respect `[nanosql(sql_ty = "...")]` attribute
-        let sql_ty = attrs.sql_ty.as_ref().unwrap_or(&field.ty);
+    } else if let Some(f) = col_pk {
+        let sql_ty = f.sql_ty();
         Ok(quote!(<#sql_ty as ::nanosql::AsSqlTy>::Borrowed<#input_lt>))
     } else {
         Ok(quote!(::nanosql::table::PrimaryKeyMissing))

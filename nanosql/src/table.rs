@@ -85,7 +85,7 @@ use serde_json::Value as JsonValue;
 ///   ```
 ///   or
 ///   ```text
-///   #[nanosql(fk(TableName => ("my_col_1" => "other_col_1", "my_col_N" => "other_col_N")))]
+///   #[nanosql(fk(TableName => ("my_col_1" = "other_col_1", "my_col_N" = "other_col_N")))]
 ///   ```
 ///   Specifies a compound `FOREIGN KEY` on the table. The specified tuple of columns must
 ///   **not** be empty. You can repeat this attribute with different combinations of columns
@@ -169,6 +169,18 @@ use serde_json::Value as JsonValue;
 ///   If `unique` is given, the values _in the index_ have to be all distinct.
 ///   (NOTE: for a partial index, this is _not_ the same as the column having
 ///   unique values!)
+/// * ```text
+///   #[nanosql(ignore)]
+///   ```
+/// or
+///   ```text
+///   #[nanosql(skip)]
+///   ```
+/// Disregards the field completely when generating the schema, serializing
+/// parameters, or deserializing results. This attribute is available on other
+/// derived traits as well, e.g. `Param`, `ResultRecord`, `ToSql`, `FromSql`.
+/// When used on `FromSql`, and `ResultRecord`, the corresponding field will
+/// be populated with the `Default::default()` value, not from the database.
 ///
 /// See the [SQLite docs](https://www.sqlite.org/lang_createtable.html) for
 /// more details on creating tables, columns, and typing.

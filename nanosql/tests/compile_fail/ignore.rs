@@ -2,7 +2,7 @@
 //! allowed to implement `AsSqlTy`, `ToSql`, and `FromSql`.
 
 use std::borrow::Cow;
-use nanosql::{Result, AsSqlTy, ToSql, FromSql};
+use nanosql::{Result, AsSqlTy, ToSql, FromSql, Table};
 
 
 #[derive(AsSqlTy)]
@@ -97,6 +97,47 @@ struct FromSqlMultiFieldTuple (
     u16,
     Cow<'static, str>,
 );
+
+#[derive(Table)]
+#[nanosql(pk = [pk_field_1, pk_field_2])]
+//~^ ERROR unknown column `pk_field_2` in primary key
+struct TableLevelPkOnIgnored {
+    pk_field_1: u32,
+    #[nanosql(ignore)]
+    pk_field_2: String,
+    not_a_key: f64,
+}
+
+#[derive(Table)]
+#[nanosql(fk(OtherTable => (connection_1 = pk_1, connection_2 = pk_2)))]
+//~^ ERROR unknown column `connection_1` in foreign key
+struct TableLevelFkOnIgnored {
+    #[nanosql(skip)]
+    connection_1: Option<Box<str>>,
+    value: Option<i64>,
+    connection_2: Option<[u8; 32]>,
+}
+
+#[derive(Table)]
+#[nanosql(index(unique, columns(baz, qux, foo)))]
+//~^ ERROR unknown column `qux` in table-level index
+struct TableLevelIndexOnIgnored {
+    foo: i32,
+    baz: i32,
+    #[nanosql(ignore)]
+    qux: i32,
+    nop: Vec<u8>,
+}
+
+#[derive(Table)]
+#[nanosql(pk_ty = Box<str>)]
+//~^ ERROR Explicit PK type given to table without a PK
+struct PkTypeOnIgnoredPk {
+    #[nanosql(primary_key)]
+    #[nanosql(skip)]
+    key: String,
+    value: f64,
+}
 
 fn main() -> Result<()> {
     Ok(())

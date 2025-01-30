@@ -20,9 +20,6 @@ pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     }
 }
 
-/// TODO(H2CO3): respect a field-level `ignore` or `transparent` attribute,
-/// for selecting exactly one of >1 fields to base the impl on (either by
-/// ignoring all but one of them, or by marking exactly one as transparent).
 fn expand_struct(
     input: &DeriveInput,
     _attrs: ContainerAttributes,

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::rc::Rc;
-use nanosql::{define_query, Result, Connection, ConnectionExt, Single};
+use nanosql::{define_query, Result, Connection, ConnectionExt, Single, SqlTy, TyPrim};
 use nanosql::{Table, Param, ResultRecord, AsSqlTy, ToSql, FromSql};
 
 
@@ -538,6 +538,83 @@ fn ignored_fromsql_unnamed() -> Result<()> {
             NotFromSqlButDefault,
         ),
     );
+
+    Ok(())
+}
+
+#[derive(Clone, PartialEq, Debug, Table, Param, ResultRecord)]
+struct TableWithIgnore {
+    #[nanosql(rename = "preferred_hue")]
+    favorite_color: Option<String>,
+    #[nanosql(ignore)]
+    non_persistent_state: Vec<DoesNotImplementDefaultOrToSqlOrParam>,
+    #[nanosql(skip)]
+    defaulted_stuff: NotFromSqlButDefault,
+    #[nanosql(pk)] // PRIMARY KEY after ignored fields, to shake things up
+    id: u64,
+    #[nanosql(fk = OtherTable::uniq_id)]
+    more_at_the_end: u16,
+}
+
+#[derive(PartialEq, Debug, Table, Param, ResultRecord)]
+struct OtherTable {
+    #[nanosql(pk)]
+    uniq_id: u16,
+    value: Vec<u8>,
+}
+
+#[test]
+fn table_with_ignore() -> Result<()> {
+    let mut conn = Connection::connect_in_memory()?;
+
+    // Smoke test: create table, then perform some CRUD operations
+    conn.create_table::<OtherTable>()?;
+    conn.create_table::<TableWithIgnore>()?;
+    conn.insert_one(OtherTable {
+        uniq_id: 2424,
+        value: vec![13, 37, 42, 24, 99],
+    })?;
+    conn.insert_one(TableWithIgnore {
+        id: 134237, // exceeds `u16` to make sure it's not mixed up with `more_at_the_end`
+        favorite_color: "alizarin crimson".to_string().into(),
+        non_persistent_state: vec![
+            DoesNotImplementDefaultOrToSqlOrParam,
+            DoesNotImplementDefaultOrToSqlOrParam,
+        ],
+        defaulted_stuff: NotFromSqlButDefault,
+        more_at_the_end: 2424,
+    })?;
+
+    let results: Vec<TableWithIgnore> = conn.select_all()?;
+    assert_eq!(results, vec![
+        TableWithIgnore {
+            id: 134237,
+            favorite_color: Some("alizarin crimson".to_owned()),
+            non_persistent_state: vec![], // uses Default::default(), does NOT round-trip
+            defaulted_stuff: NotFromSqlButDefault,
+            more_at_the_end: 2424,
+        },
+    ]);
+
+    let one: TableWithIgnore = conn.select_by_key(134237)?;
+    assert_eq!(results, [one.clone()]);
+
+    let two = conn.delete_by_key(134237)?;
+    assert_eq!(two, Some(one));
+
+    let missing: Option<TableWithIgnore> = conn.select_by_key_opt(134237)?;
+    assert_eq!(missing, None);
+
+    // actually check the table description itself
+    let tbl_desc = TableWithIgnore::description();
+    assert_eq!(tbl_desc.name, "TableWithIgnore");
+    assert_eq!(tbl_desc.columns.len(), 3);
+    assert_eq!(tbl_desc.columns[0].name, "preferred_hue");
+    assert_eq!(tbl_desc.columns[0].ty, Some(SqlTy::nullable(TyPrim::Text)));
+    assert_eq!(tbl_desc.columns[1].name, "id");
+    assert_eq!(tbl_desc.columns[1].ty, Some(SqlTy::new(TyPrim::Integer)));
+    assert_eq!(tbl_desc.columns[2].name, "more_at_the_end");
+    assert_eq!(tbl_desc.columns[2].ty, Some(SqlTy::new(TyPrim::Integer)));
 
     Ok(())
 }

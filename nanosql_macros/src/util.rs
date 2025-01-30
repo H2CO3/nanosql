@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::collections::HashSet;
 use proc_macro::TokenStream as TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
-use syn::{Token, Fields, WhereClause, WherePredicate, TypeParamBound, Type, Lifetime};
+use syn::{Token, Field, Fields, WhereClause, WherePredicate, TypeParamBound, Type, Lifetime};
 use syn::{parse_quote, Lit, LitBool, LitStr};
 use syn::parse::{Parse, ParseStream, Error};
 use syn::punctuated::Punctuated;
@@ -176,6 +176,23 @@ pub struct FieldAttributes {
     /// and its default value will be used when retrieving the result set.
     #[deluxe(alias = skip, default = false)]
     pub ignore: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldAndColumn {
+    /// The `syn` AST for the field declaration.
+    pub field: Field,
+    /// The (possibly renamed) column name, derived from the field's name.
+    pub column_name: String,
+    /// `#[nanosql(...)]` (deluxe) attributes.
+    pub attributes: FieldAttributes,
+}
+
+impl FieldAndColumn {
+    /// Return the field's SQL type, respecting the `#[nanosql(sql_ty = "...")]` attribute
+    pub fn sql_ty(&self) -> &Type {
+        self.attributes.sql_ty.as_ref().unwrap_or(&self.field.ty)
+    }
 }
 
 /// Ensures that an SQL expression that is going to be interpolated
@@ -835,6 +852,15 @@ impl Display for IdentOrStr {
 impl PartialEq for IdentOrStr {
     fn eq(&self, other: &Self) -> bool {
         self.to_string() == other.to_string()
+    }
+}
+
+impl<T> PartialEq<T> for IdentOrStr
+where
+    T: AsRef<str>,
+{
+    fn eq(&self, other: &T) -> bool {
+        self.to_string() == other.as_ref()
     }
 }
 
