@@ -416,6 +416,9 @@ impl_result_record_for_primitive!{
     Rc<str>,
     Arc<str>,
     String,
+    Box<[u8]>,
+    Rc<[u8]>,
+    Arc<[u8]>,
     Vec<u8>,
     Value,
 }
@@ -529,24 +532,6 @@ impl<T: FromSql> ResultRecord for Option<T> {
 }
 
 impl<const N: usize> ResultRecord for [u8; N] {
-    fn from_row(row: &Row<'_>) -> Result<Self> {
-        primitive_from_sql(row)
-    }
-}
-
-impl ResultRecord for Box<[u8]> {
-    fn from_row(row: &Row<'_>) -> Result<Self> {
-        primitive_from_sql(row).map(Vec::into_boxed_slice)
-    }
-}
-
-impl ResultRecord for Rc<[u8]> {
-    fn from_row(row: &Row<'_>) -> Result<Self> {
-        primitive_from_sql(row)
-    }
-}
-
-impl ResultRecord for Arc<[u8]> {
     fn from_row(row: &Row<'_>) -> Result<Self> {
         primitive_from_sql(row)
     }
