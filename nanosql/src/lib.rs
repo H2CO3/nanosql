@@ -12,6 +12,8 @@ pub mod stmt;
 pub mod conn;
 pub mod explain;
 pub mod error;
+#[cfg(feature = "mime")]
+pub mod mime;
 
 pub extern crate rusqlite;
 
@@ -39,6 +41,9 @@ pub use uuid::Uuid;
 
 #[cfg(feature = "json")]
 pub use serde_json::Value as JsonValue;
+
+#[cfg(feature = "mime")]
+pub use crate::mime::Mime;
 
 #[cfg(feature = "derive")]
 pub use nanosql_macros::{ToSql, FromSql, AsSqlTy, Param, ResultRecord, Table, InsertInput};

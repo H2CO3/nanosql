@@ -41,7 +41,7 @@ impl<'conn, Q: Query> CompiledStatement<'conn, Q> {
         // nothing to bind to the parameters when explaining, the parameter type
         // of `Explain` is `()`, but that upsets the `Param` impls, leading to a
         // `ParamCountMismatch` error. Therefore we only actually bind parameters
-        // when this query is is _not_ an EXPLAIN or EXPLAIN QUERY PLAN statement.
+        // when this query is _not_ an EXPLAIN or EXPLAIN QUERY PLAN statement.
         if self.statement.is_explain() == 0 {
             self.statement.clear_bindings();
             params.borrow().bind(&mut self.statement)?;
