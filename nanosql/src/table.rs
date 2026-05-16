@@ -85,11 +85,26 @@ use serde_json::Value as JsonValue;
 ///   ```
 ///   or
 ///   ```text
-///   #[nanosql(fk(TableName => ("my_col_1" = "other_col_1", "my_col_N" = "other_col_N")))]
+///   #[nanosql(fk(
+///       TableName => ("my_col_1" = "other_col_1", "my_col_N" = "other_col_N"),
+///       on_delete = cascade,
+///       on_update = set_null
+///   ))]
 ///   ```
 ///   Specifies a compound `FOREIGN KEY` on the table. The specified tuple of columns must
 ///   **not** be empty. You can repeat this attribute with different combinations of columns
 ///   as many times as you want. The table and column names may be identifiers or strings.
+///   The optional `on_delete` and `on_update` arguments specify the conflict resolution
+///   action to be taken when a parent key is deleted or updated. The action may be one of
+///   the following identifiers or strings:
+///     * `no_action`
+///     * `restrict`
+///     * `set_null`
+///     * `set_default`
+///     * `cascade`
+///
+///   See the [SQLite documentation](https://www.sqlite.org/foreignkeys.html#fk_actions)
+///   for a detailed explanation of these actions.
 /// * ```text
 ///   #[nanosql(unique = [column_1, column_N])]
 ///   ```
@@ -151,11 +166,17 @@ use serde_json::Value as JsonValue;
 ///   ```
 ///   or
 ///   ```text
-///   #[nanosql(fk("OtherTable" => "some_column"))]
+///   #[nanosql(fk(
+///       "OtherTable" => "some_column",
+///       on_delete = set_default,
+///       on_update = restrict,
+///   ))]
 ///   ```
 ///   Defines a foreign key relationship between this column and another column
 ///   of a different table. (The table on the other side may also be this table,
 ///   for representing a hierarchy.) You can specify multiple foreign key columns.
+///   The optional `on_delete` and `on_update` attributes work in exactly the same
+///   way as they do in the context of the struct-level `fk` attribute.
 /// * ```text
 ///   #[nanosql(index(unique, desc, where = "predicate"))]
 ///   ```
@@ -339,7 +360,13 @@ impl TableDesc {
     /// The iterator must return columns in pairs,
     /// where the first item is a column in this table,
     /// and the second item is a column in the foreign table.
-    pub fn foreign_key<T, I, K1, K2>(self, table: T, columns: I) -> Self
+    pub fn foreign_key<T, I, K1, K2>(
+        self,
+        table: T,
+        columns: I,
+        on_delete: ForeignKeyConflictAction,
+        on_update: ForeignKeyConflictAction,
+    ) -> Self
     where
         T: Into<String>,
         I: IntoIterator<Item = (K1, K2)>,
@@ -354,6 +381,8 @@ impl TableDesc {
         self.constrain(TableConstraint::ForeignKey {
             table: table.into(),
             column_pairs,
+            on_delete,
+            on_update,
         })
     }
 
@@ -505,10 +534,18 @@ impl Column {
     }
 
     /// Set this column as a `FOREIGN KEY`.
-    pub fn foreign_key(self, table: impl Into<String>, column: impl Into<String>) -> Self {
+    pub fn foreign_key(
+        self,
+        table: impl Into<String>,
+        column: impl Into<String>,
+        on_delete: ForeignKeyConflictAction,
+        on_update: ForeignKeyConflictAction,
+    ) -> Self {
         self.constrain(ColumnConstraint::ForeignKey {
             table: table.into(),
             column: column.into(),
+            on_delete,
+            on_update,
         })
     }
 
@@ -700,6 +737,10 @@ pub enum ColumnConstraint {
         table: String,
         /// The name of the referenced column within the referenced table.
         column: String,
+        /// The action to take when parent keys are deleted.
+        on_delete: ForeignKeyConflictAction,
+        /// The action to take when parent keys are updated.
+        on_update: ForeignKeyConflictAction,
     },
     /// Enforce that values of this column are unique across the table.
     Unique,
@@ -729,8 +770,17 @@ impl Display for ColumnConstraint {
             ColumnConstraint::PrimaryKey => {
                 formatter.write_str("PRIMARY KEY")
             }
-            ColumnConstraint::ForeignKey { table, column } => {
-                write!(formatter, r#"REFERENCES "{table}"("{column}") DEFERRABLE INITIALLY DEFERRED"#)
+            ColumnConstraint::ForeignKey { table, column, on_delete, on_update } => {
+                write!(formatter, r#"REFERENCES "{table}"("{column}")"#)?;
+
+                if *on_delete != ForeignKeyConflictAction::default() {
+                    write!(formatter, " ON DELETE {on_delete}")?;
+                }
+                if *on_update != ForeignKeyConflictAction::default() {
+                    write!(formatter, " ON UPDATE {on_update}")?;
+                }
+
+                formatter.write_str(" DEFERRABLE INITIALLY DEFERRED")
             }
             ColumnConstraint::Unique => {
                 formatter.write_str("UNIQUE")
@@ -783,6 +833,40 @@ impl Display for SortOrder {
         formatter.write_str(match *self {
             SortOrder::Ascending => "ASC",
             SortOrder::Descending => "DESC",
+        })
+    }
+}
+
+/// Handler for the `ON DELETE` and/or `ON UPDATE` clause of a `FOREIGN KEY`. See
+/// the [SQLite documentation](https://www.sqlite.org/foreignkeys.html#fk_actions)
+/// for details.
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ForeignKeyConflictAction {
+    /// `NO ACTION`: when a parent key is deleted or modified, no special
+    /// action is taken. **This is the default.**
+    #[default]
+    NoAction,
+    /// `RESTRICT`: the application is prohibited from deleting or updating
+    /// a parent key to which at least 1 child key is mapped.
+    Restrict,
+    /// `SET NULL`: sets corresponding child keys of deleted/updated parents
+    /// to the SQL `NULL` value.
+    SetNull,
+    /// `SET DEFAULT`: sets corresponding child keys of deleted/updated parents
+    /// to the default value of the column.
+    SetDefault,
+    /// `CASCADE`: propagates deletions and updates to each dependent child key.
+    Cascade,
+}
+
+impl Display for ForeignKeyConflictAction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(match *self {
+            ForeignKeyConflictAction::NoAction   => "NO ACTION",
+            ForeignKeyConflictAction::Restrict   => "RESTRICT",
+            ForeignKeyConflictAction::SetNull    => "SET NULL",
+            ForeignKeyConflictAction::SetDefault => "SET DEFAULT",
+            ForeignKeyConflictAction::Cascade    => "CASCADE",
         })
     }
 }
@@ -873,6 +957,10 @@ pub enum TableConstraint {
         table: String,
         /// The corresponding pairs of columns that make up the key in the tables.
         column_pairs: Vec<(String, String)>,
+        /// The action to take when parent keys are deleted.
+        on_delete: ForeignKeyConflictAction,
+        /// The action to take when parent keys are updated.
+        on_update: ForeignKeyConflictAction,
     },
     /// A multi-column uniqueness constraint.
     Unique {
@@ -901,7 +989,7 @@ impl Display for TableConstraint {
 
                 formatter.write_char(')')
             }
-            TableConstraint::ForeignKey { table, column_pairs } => {
+            TableConstraint::ForeignKey { table, column_pairs, on_delete, on_update } => {
                 write!(formatter, "FOREIGN KEY(")?;
 
                 let mut sep = "";
@@ -918,7 +1006,16 @@ impl Display for TableConstraint {
                     sep = ", ";
                 }
 
-                formatter.write_str(") DEFERRABLE INITIALLY DEFERRED")
+                formatter.write_str(")")?;
+
+                if *on_delete != ForeignKeyConflictAction::default() {
+                    write!(formatter, " ON DELETE {on_delete}")?;
+                }
+                if *on_update != ForeignKeyConflictAction::default() {
+                    write!(formatter, " ON UPDATE {on_update}")?;
+                }
+
+                formatter.write_str(" DEFERRABLE INITIALLY DEFERRED")
             }
             TableConstraint::Unique { columns } => {
                 formatter.write_str("UNIQUE(")?;

@@ -12,7 +12,7 @@ struct Department {
 }
 
 #[derive(Clone, Debug, Param, ResultRecord, Table)]
-#[nanosql(fk("bogus_table" => ("some_fk_2" = "some_col", "some_fk_1" = "other_col")))]
+#[nanosql(fk("bogus_table" => ("some_fk_2" = "some_col", "some_fk_1" = "other_col"), on_update = set_null, on_delete = set_default))]
 struct Employee {
     #[nanosql(pk)]
     employee_id: i64,
@@ -23,7 +23,7 @@ struct Employee {
     ///
     /// For consistency with table-level FKs, you can specify an FK
     /// either as `fk(foreign_table => foreign_column)`, ...
-    #[nanosql(fk("Employee" => "employee_id"))]
+    #[nanosql(fk("Employee" => "employee_id", on_delete = cascade, on_update = restrict))]
     boss_employee_id: Option<i64>,
     /// or as a Rust path, like `fk = foreign_table::foreign_column`.
     /// Both syntaxes have the same meaning. Instead of identifiers,
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
     );
     assert!(
         sql.contains(
-            r#""boss_employee_id" INTEGER NULL REFERENCES "Employee"("employee_id") DEFERRABLE INITIALLY DEFERRED"#
+            r#""boss_employee_id" INTEGER NULL REFERENCES "Employee"("employee_id") ON DELETE CASCADE ON UPDATE RESTRICT DEFERRABLE INITIALLY DEFERRED"#
         )
     );
 
@@ -83,7 +83,7 @@ fn main() -> Result<()> {
         .to_string();
 
     assert!(fk_sql.contains(
-        r#"FOREIGN KEY("some_fk_2", "some_fk_1") REFERENCES "bogus_table"("some_col", "other_col") DEFERRABLE INITIALLY DEFERRED"#
+        r#"FOREIGN KEY("some_fk_2", "some_fk_1") REFERENCES "bogus_table"("some_col", "other_col") ON DELETE SET DEFAULT ON UPDATE SET NULL DEFERRABLE INITIALLY DEFERRED"#
     ));
 
     // Ensure that the correct indexes are automatically created for the FOREIGN KEY columns.

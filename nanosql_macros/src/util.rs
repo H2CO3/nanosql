@@ -256,15 +256,22 @@ impl ParseMetaItem for SqlExprStr {
 pub struct ColumnForeignKey {
     pub table: IdentOrStr,
     pub column: IdentOrStr,
+    pub conflict_actions: ForeignKeyConflictActions,
 }
 
 impl ToTokens for ColumnForeignKey {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let table = &self.table;
-        let column = &self.column;
+        let ColumnForeignKey {
+            table,
+            column,
+            conflict_actions: ForeignKeyConflictActions {
+                on_delete,
+                on_update,
+            },
+        } = self;
 
         tokens.extend(quote!{
-            .foreign_key(#table, #column)
+            .foreign_key(#table, #column, #on_delete, #on_update)
         });
     }
 }
@@ -283,8 +290,24 @@ impl ParseMetaItem for ColumnForeignKey {
         }
 
         let column: IdentOrStr = input.parse()?;
+        let mut fk_spec = ColumnForeignKey {
+            table,
+            column,
+            conflict_actions: ForeignKeyConflictActions::default(),
+        };
 
-        Ok(ColumnForeignKey { table, column })
+        if input.peek(Token![,]) {
+            let _: Token![,] = input.parse()?;
+
+            fk_spec.conflict_actions = input.parse()?;
+
+            // eat trailing comma, if any
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+
+        Ok(fk_spec)
     }
 }
 
@@ -515,20 +538,68 @@ impl ToTokens for SortOrder {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub struct ForeignKeyConflictActions {
+    pub on_delete: ForeignKeyConflictAction,
+    pub on_update: ForeignKeyConflictAction,
+}
+
+impl Parse for ForeignKeyConflictActions {
+    fn parse(input: ParseStream<'_>) -> Result<Self, Error> {
+        mod kw {
+            syn::custom_keyword!(on_delete);
+            syn::custom_keyword!(on_update);
+        }
+
+        let mut actions = Self::default();
+
+        loop {
+            let lah = input.lookahead1();
+            if lah.peek(kw::on_delete) {
+                let _: kw::on_delete = input.parse()?;
+                let _: Token![=] = input.parse()?;
+                actions.on_delete = input.parse()?;
+            } else if input.peek(kw::on_update) {
+                let _: kw::on_update = input.parse()?;
+                let _: Token![=] = input.parse()?;
+                actions.on_update = input.parse()?;
+            } else {
+                break;
+            }
+
+            // eat comma separator
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+
+        Ok(actions)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TableForeignKey {
     pub table: IdentOrStr,
     pub columns: Punctuated<(IdentOrStr, IdentOrStr), Token![,]>,
+    pub conflict_actions: ForeignKeyConflictActions,
 }
 
 impl ToTokens for TableForeignKey {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let table_name = &self.table;
-        let own_cols = self.columns.iter().map(|pair| &pair.0);
-        let other_cols = self.columns.iter().map(|pair| &pair.1);
+        let TableForeignKey {
+            table,
+            columns,
+            conflict_actions: ForeignKeyConflictActions {
+                on_delete,
+                on_update,
+            },
+        } = self;
+
+        let own_cols = columns.iter().map(|pair| &pair.0);
+        let other_cols = columns.iter().map(|pair| &pair.1);
 
         tokens.extend(quote!{
-            .foreign_key(#table_name, [#((#own_cols, #other_cols),)*])
+            .foreign_key(#table, [#((#own_cols, #other_cols),)*], #on_delete, #on_update)
         });
     }
 }
@@ -547,7 +618,24 @@ impl ParseMetaItem for TableForeignKey {
             Ok((this, other))
         })?;
 
-        Ok(TableForeignKey { table, columns })
+        let mut fk_spec = TableForeignKey {
+            table,
+            columns,
+            conflict_actions: ForeignKeyConflictActions::default(),
+        };
+
+        if input.peek(Token![,]) {
+            let _: Token![,] = input.parse()?;
+
+            fk_spec.conflict_actions = input.parse()?;
+
+            // eat trailing comma, if any
+            if input.peek(Token![,]) {
+                let _: Token![,] = input.parse()?;
+            }
+        }
+
+        Ok(fk_spec)
     }
 }
 
@@ -867,5 +955,47 @@ where
 impl Hash for IdentOrStr {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.to_string().hash(state);
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub enum ForeignKeyConflictAction {
+    #[default]
+    NoAction,
+    Restrict,
+    SetNull,
+    SetDefault,
+    Cascade,
+}
+
+impl Parse for ForeignKeyConflictAction {
+    fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
+        let raw: IdentOrStr = stream.parse()?;
+
+        Ok(match raw.to_string().as_str() {
+            "no_action"   => ForeignKeyConflictAction::NoAction,
+            "restrict"    => ForeignKeyConflictAction::Restrict,
+            "set_null"    => ForeignKeyConflictAction::SetNull,
+            "set_default" => ForeignKeyConflictAction::SetDefault,
+            "cascade"     => ForeignKeyConflictAction::Cascade,
+            _ => return Err(Error::new_spanned(&raw, "invalid foreign key conflict resolution action")),
+        })
+    }
+}
+
+impl ToTokens for ForeignKeyConflictAction {
+    fn to_tokens(&self, ts: &mut TokenStream2) {
+        let variant_name = match *self {
+            ForeignKeyConflictAction::NoAction   => "NoAction",
+            ForeignKeyConflictAction::Restrict   => "Restrict",
+            ForeignKeyConflictAction::SetNull    => "SetNull",
+            ForeignKeyConflictAction::SetDefault => "SetDefault",
+            ForeignKeyConflictAction::Cascade    => "Cascade",
+        };
+        let variant_ident = Ident::new(variant_name, Span::call_site());
+
+        ts.extend(quote!{
+            ::nanosql::table::ForeignKeyConflictAction::#variant_ident
+        });
     }
 }
