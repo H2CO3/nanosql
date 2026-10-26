@@ -2,12 +2,13 @@ use proc_macro2::{TokenStream, Span};
 use syn::Error;
 use syn::DeriveInput;
 use quote::quote;
+use attribute_derive::FromAttr;
 use crate::util::ContainerAttributes;
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
-    let attrs: ContainerAttributes = deluxe::parse_attributes(&input)?;
+    let attrs = ContainerAttributes::from_attributes(&input.attrs)?;
     let (impl_gen, ty_gen, where_clause) = input.generics.split_for_impl();
     let ty_name = input.ident;
     let table = attrs.table.ok_or_else(|| {

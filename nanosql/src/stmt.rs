@@ -81,7 +81,7 @@ impl<Q> Debug for CompiledStatement<'_, Q> {
 
         formatter
             .debug_struct("CompiledStatement")
-            .field("columns", &self.statement.column_names())
+            .field("columns", &self.statement.column_names().collect::<Vec<_>>())
             .field("params", &param_names)
             .field("sql", &format_args!("{sql}")) // the SQL shouldn't be escaped
             .finish()

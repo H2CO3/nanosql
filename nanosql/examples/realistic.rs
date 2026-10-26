@@ -12,10 +12,10 @@ use nanosql::{AsSqlTy, ToSql, FromSql, Table, Param, ResultRecord, InsertInput};
 #[derive(Clone, Debug, Table, Param, ResultRecord)]
 #[nanosql(rename = "taxon")]
 struct Taxon {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     tax_id: u64,
     rank: Rank,
-    #[nanosql(fk = Taxon::tax_id)]
+    #[nanosql(foreign_key = Taxon::tax_id)]
     parent_tax_id: Option<u64>,
 }
 
@@ -44,9 +44,9 @@ enum Rank {
 #[nanosql(rename = "name", insert_input_ty = InsertName<'p>)]
 #[nanosql(index(unique, columns(tax_id, kind), where = "kind = 'scientific_name'"))]
 struct Name {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     name_id: u64,
-    #[nanosql(fk = Taxon::tax_id)]
+    #[nanosql(foreign_key = Taxon::tax_id)]
     tax_id: u64,
     #[nanosql(index)]
     name: String,

@@ -73,7 +73,7 @@ use serde_json::Value as JsonValue;
 ///   ```
 ///   or
 ///   ```text
-///   #[nanosql(pk = [column_1, column_N])]
+///   #[nanosql(primary_key = [column_1, column_N])]
 ///   ```
 ///   Specifies that these columns form the (compound) `PRIMARY KEY` of this table.
 ///   You may not specify a field-level primary key if you use this attribute.
@@ -85,7 +85,7 @@ use serde_json::Value as JsonValue;
 ///   ```
 ///   or
 ///   ```text
-///   #[nanosql(fk(
+///   #[nanosql(foreign_key(
 ///       TableName => ("my_col_1" = "other_col_1", "my_col_N" = "other_col_N"),
 ///       on_delete = cascade,
 ///       on_update = set_null
@@ -157,7 +157,7 @@ use serde_json::Value as JsonValue;
 ///   ```
 ///   declares the column as `GENERATED ALWAYS [VIRTUAL | STORED]`. The derive
 ///   macro will ensure that the expression you specify is syntactically valid.
-/// * `#[nanosql(primary_key)]` or `#[nanosql(pk)]`: Defines the column as
+/// * `#[nanosql(primary_key)]`: Defines the column as
 ///   the `PRIMARY KEY` of the table. This may only be used on a single column
 ///   within any given table. This attribute may not be used together with the
 ///   table-level `primary_key` attribute!
@@ -166,11 +166,13 @@ use serde_json::Value as JsonValue;
 ///   ```
 ///   or
 ///   ```text
-///   #[nanosql(fk(
+///   #[nanosql(
+///     foreign_key(
 ///       "OtherTable" => "some_column",
 ///       on_delete = set_default,
 ///       on_update = restrict,
-///   ))]
+///     )
+///   )]
 ///   ```
 ///   Defines a foreign key relationship between this column and another column
 ///   of a different table. (The table on the other side may also be this table,
@@ -192,10 +194,6 @@ use serde_json::Value as JsonValue;
 ///   unique values!)
 /// * ```text
 ///   #[nanosql(ignore)]
-///   ```
-/// or
-///   ```text
-///   #[nanosql(skip)]
 ///   ```
 /// Disregards the field completely when generating the schema, serializing
 /// parameters, or deserializing results. This attribute is available on other
@@ -1746,7 +1744,7 @@ where
 /// ```
 /// # use nanosql::{Connection, ConnectionExt, Table, Param, ResultRecord, SelectByKey};
 /// #[derive(Clone, PartialEq, Eq, Debug, Table, Param, ResultRecord)]
-/// #[nanosql(pk = [title, founded_in_year])] // NB: columns are NOT in declaration order!
+/// #[nanosql(primary_key = [title, founded_in_year])] // NB: columns are NOT in declaration order!
 /// struct Department {
 ///     founded_in_year: u16,
 ///     #[nanosql(rename = title)]
@@ -1874,7 +1872,7 @@ where
 /// # use nanosql::{Connection, ConnectionExt, Param, ResultRecord, Table, DeleteByKey};
 /// #[derive(Clone, PartialEq, Eq, Debug, Param, ResultRecord, Table)]
 /// struct Part {
-///     #[nanosql(pk)]
+///     #[nanosql(primary_key)]
 ///     serial: Box<str>,
 ///     description: String,
 ///     weight_g: u32,

@@ -1,6 +1,8 @@
 use core::fmt::{self, Display, Formatter, Write};
+use core::ops::Deref;
 use std::hash::{Hash, Hasher};
 use std::collections::HashSet;
+
 use proc_macro::TokenStream as TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, Span, Ident};
 use syn::{Token, Field, Fields, WhereClause, WherePredicate, TypeParamBound, Type, Lifetime};
@@ -9,7 +11,12 @@ use syn::parse::{Parse, ParseStream, Error};
 use syn::punctuated::Punctuated;
 use syn::ext::IdentExt;
 use quote::{quote, quote_spanned, ToTokens};
-use deluxe::{ParseAttributes, ParseMetaItem, ParseMode, SpannedValue};
+use attribute_derive::{
+    FromAttr,
+    from_partial::{FromPartial, Partial},
+    utils::FlagOrValue,
+    parsing::{SpannedValue, AttributeValue, AttributeBase, PositionalValue},
+};
 
 
 pub fn expand<F>(ts: TokenStream, f: F) -> TokenStream
@@ -35,8 +42,8 @@ pub fn add_bounds(
         Fields::Unit => {}
         Fields::Named(fields) => {
             for field in &fields.named {
-                let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
-                if attrs.ignore {
+                let attrs = FieldAttributes::from_attributes(&field.attrs)?;
+                if attrs.ignore.is_set() {
                     uniq_types_for_ignored.insert(&field.ty);
                 } else {
                     uniq_types_for_bounds.insert(&field.ty);
@@ -45,8 +52,8 @@ pub fn add_bounds(
         }
         Fields::Unnamed(fields) => {
             for field in &fields.unnamed {
-                let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
-                if attrs.ignore {
+                let attrs = FieldAttributes::from_attributes(&field.attrs)?;
+                if attrs.ignore.is_set() {
                     uniq_types_for_ignored.insert(&field.ty);
                 } else {
                     uniq_types_for_bounds.insert(&field.ty);
@@ -97,24 +104,21 @@ macro_rules! return_ok_if_eof_or_trailing {
 }
 
 /// Top-level attributes on a struct or enum definition.
-#[derive(Clone, Debug, ParseAttributes)]
-#[deluxe(attributes(nanosql))]
+#[derive(Clone, Debug, FromAttr)]
+#[attribute(ident = nanosql)]
 pub struct ContainerAttributes {
     /// For `#[derive(Param)]`: specifies the prefix character before the parameter name.
-    #[deluxe(alias = prefix, alias = param_pfx)]
     pub param_prefix: Option<ParamPrefix>,
     /// For `#[derive(Table)]`: changes the `InsertInput` associated type from `Self`.
-    #[deluxe(default = parse_quote!(Self))]
-    #[deluxe(alias = insert_ty, alias = insert_type, alias = insert_input_type)]
+    #[attribute(default = parse_quote!(Self))]
     pub insert_input_ty: Type,
     /// For `#[derive(Table)]`: changes the `PrimaryKey` associated type from the default
     /// (single scalar for column-level PK, tuple for table-level PK). Used for giving
     /// names to the columns of a compound PK, for readability and correctness.
-    #[deluxe(alias = pk_ty, alias = pk_type, alias = primary_key_type)]
-    pub primary_key_ty: Option<Type>,
+    pub pk_ty: Option<Type>,
     /// For `#[derive(Table)]`: changes the declared lifetime parameter of the
     /// `InsertInput` and `PrimaryKey` associated types from the default `'p`.
-    #[deluxe(default = parse_quote!('p))]
+    #[attribute(default = parse_quote!('p))]
     pub input_lt: Lifetime,
     /// For `#[derive(Table)]`: the name of the table itself.
     pub rename: Option<IdentOrStr>,
@@ -122,28 +126,27 @@ pub struct ContainerAttributes {
     pub table: Option<Type>,
     /// For various macros: rename all fields or variants,
     /// according to the specified case conversion.
-    #[deluxe(default, with = deluxe::with::syn)]
+    #[attribute(default = CaseConversion::default())]
     pub rename_all: CaseConversion,
     /// For `#[derive(Table)]`: the Primary Key columns.
-    #[deluxe(alias = pk)]
-    pub primary_key: Option<SpannedValue<Vec<IdentOrStr>>>,
+    pub primary_key: Option<Vec<IdentOrStr>>,
     /// For `#[derive(Table)]`: the Foreign Key columns.
-    #[deluxe(append, alias = fk)]
-    pub foreign_key: Vec<TableForeignKey>,
+    #[attribute(default = Default::default())]
+    pub foreign_key: Any<TableForeignKey>,
     /// For `#[derive(Table)]`: add an explicit index.
-    #[deluxe(append)]
-    pub index: Vec<TableIndexSpec>,
+    #[attribute(default = Any::default())]
+    pub index: Any<TableIndexSpec>,
     /// For `#[derive(Table)]`: applies `UNIQUE` constraints on many columns.
-    #[deluxe(append)]
-    pub unique: Vec<SpannedValue<Vec<IdentOrStr>>>,
+    #[attribute(default = Default::default())]
+    pub unique: Any<Vec<IdentOrStr>>,
     /// For `#[derive(Table)]`: applies additional `CHECK` constraints.
-    #[deluxe(append)]
-    pub check: Vec<SqlExprStr>,
+    #[attribute(default = Default::default())]
+    pub check: Any<SqlExprStr>,
 }
 
 /// Attributes on a struct field or an enum variant.
-#[derive(Clone, Debug, ParseAttributes)]
-#[deluxe(attributes(nanosql))]
+#[derive(Debug, FromAttr)]
+#[attribute(ident = nanosql)]
 pub struct FieldAttributes {
     /// For various derive macros: parse and serialize the field or variant
     /// with the given name, instead of the original field or variant name.
@@ -152,19 +155,16 @@ pub struct FieldAttributes {
     /// (`AsSqlTy`) for the column, instead of using the field's type.
     pub sql_ty: Option<Type>,
     /// For `#[derive(Table)]`: marks the field as the PRIMARY KEY.
-    #[deluxe(alias = pk, default = SpannedValue::new(false))]
-    pub primary_key: SpannedValue<bool>,
+    pub primary_key: FlagOrValue<LitBool>,
     /// For `#[derive(Table)]`: marks the field as a FOREIGN KEY.
-    #[deluxe(alias = fk)]
     pub foreign_key: Option<ColumnForeignKey>,
     /// For `#[derive(Table)]`: adds an index to this column.
-    pub index: Option<ColumnIndexSpec>,
+    pub index: FlagOrValue<ColumnIndexSpec>,
     /// For `#[derive(Table)]`: declares that the field must be unique.
-    #[deluxe(default = false)]
-    pub unique: bool,
+    pub unique: FlagOrValue<LitBool>,
     /// For `#[derive(Table)]`: applies additional CHECK constraints.
-    #[deluxe(append)]
-    pub check: Vec<SqlExprStr>,
+    #[attribute(default = Any::default())]
+    pub check: Any<SqlExprStr>,
     /// For `#[derive(Table)]`: provides a default value when column
     /// value is omitted during insertion.
     pub default: Option<SqlExprStr>,
@@ -174,17 +174,16 @@ pub struct FieldAttributes {
     /// For `#[derive(Table, Param, ResultRecord)]`: do not serialize or
     /// deserialize this field. It will be skipped when binding parameters,
     /// and its default value will be used when retrieving the result set.
-    #[deluxe(alias = skip, default = false)]
-    pub ignore: bool,
+    pub ignore: FlagOrValue<LitBool>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FieldAndColumn {
     /// The `syn` AST for the field declaration.
     pub field: Field,
     /// The (possibly renamed) column name, derived from the field's name.
     pub column_name: String,
-    /// `#[nanosql(...)]` (deluxe) attributes.
+    /// `#[nanosql(...)]` attributes.
     pub attributes: FieldAttributes,
 }
 
@@ -246,11 +245,17 @@ impl ToTokens for SqlExprStr {
     }
 }
 
-impl ParseMetaItem for SqlExprStr {
-    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
-        input.parse::<SqlExprStr>()
+impl AttributeBase for SqlExprStr {
+    type Partial = Self;
+}
+
+impl AttributeValue for SqlExprStr {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
+        input.parse::<SqlExprStr>().map(SpannedValue::from_to_tokens)
     }
 }
+
+impl PositionalValue for SqlExprStr {}
 
 #[derive(Clone, Debug)]
 pub struct ColumnForeignKey {
@@ -276,8 +281,12 @@ impl ToTokens for ColumnForeignKey {
     }
 }
 
-impl ParseMetaItem for ColumnForeignKey {
-    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+impl AttributeBase for ColumnForeignKey {
+    type Partial = Self;
+}
+
+impl AttributeValue for ColumnForeignKey {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
         let table: IdentOrStr = input.parse()?;
 
         let lookahead = input.lookahead1();
@@ -307,7 +316,7 @@ impl ParseMetaItem for ColumnForeignKey {
             }
         }
 
-        Ok(fk_spec)
+        Ok(SpannedValue::from_to_tokens(fk_spec))
     }
 }
 
@@ -337,13 +346,20 @@ impl ToTokens for ColumnIndexSpec {
     }
 }
 
-impl ParseMetaItem for ColumnIndexSpec {
-    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+impl AttributeBase for ColumnIndexSpec {
+    type Partial = Self;
+}
+
+impl AttributeValue for ColumnIndexSpec {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
         mod kw {
             syn::custom_keyword!(unique);
-            syn::custom_keyword!(predicate);
             syn::custom_keyword!(asc);
             syn::custom_keyword!(desc);
+        }
+
+        if input.is_empty() {
+            return Err(input.error("empty index spec"));
         }
 
         let mut index_spec = ColumnIndexSpec::default();
@@ -362,7 +378,7 @@ impl ParseMetaItem for ColumnIndexSpec {
             return_ok_if_eof_or_trailing!(
                 stream: input,
                 sep: Token![,],
-                value: index_spec,
+                value: SpannedValue::from_to_tokens(index_spec),
             );
         }
 
@@ -373,7 +389,7 @@ impl ParseMetaItem for ColumnIndexSpec {
             return_ok_if_eof_or_trailing!(
                 stream: input,
                 sep: Token![,],
-                value: index_spec,
+                value: SpannedValue::from_to_tokens(index_spec),
             );
         } else if input.peek(kw::desc) {
             let _: kw::desc = input.parse()?;
@@ -382,7 +398,7 @@ impl ParseMetaItem for ColumnIndexSpec {
             return_ok_if_eof_or_trailing!(
                 stream: input,
                 sep: Token![,],
-                value: index_spec,
+                value: SpannedValue::from_to_tokens(index_spec),
             );
         }
 
@@ -399,13 +415,7 @@ impl ParseMetaItem for ColumnIndexSpec {
             }
         }
 
-        Ok(index_spec)
-    }
-
-    fn parse_meta_item_flag(_span: Span) -> Result<Self, Error> {
-        // without any arguments, just return the default config:
-        // non-unique, ascending, total index (no filter predicate)
-        Ok(ColumnIndexSpec::default())
+        Ok(SpannedValue::from_to_tokens(index_spec))
     }
 }
 
@@ -448,12 +458,15 @@ impl ToTokens for TableIndexSpec {
     }
 }
 
-impl ParseMetaItem for TableIndexSpec {
-    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+impl AttributeBase for TableIndexSpec {
+    type Partial = Self;
+}
+
+impl AttributeValue for TableIndexSpec {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
         mod kw {
             syn::custom_keyword!(unique);
             syn::custom_keyword!(columns);
-            syn::custom_keyword!(predicate);
             syn::custom_keyword!(asc);
             syn::custom_keyword!(desc);
         }
@@ -503,7 +516,11 @@ impl ParseMetaItem for TableIndexSpec {
             Ok((col_name, sort_order))
         })?;
 
-        return_ok_if_eof_or_trailing!(stream: input, sep: Token![,], value: index_spec);
+        return_ok_if_eof_or_trailing!(
+            stream: input,
+            sep: Token![,],
+            value: SpannedValue::from_to_tokens(index_spec)
+        );
 
         if input.peek(Token![where]) {
             let _: Token![where] = input.parse()?;
@@ -518,9 +535,11 @@ impl ParseMetaItem for TableIndexSpec {
             }
         }
 
-        Ok(index_spec)
+        Ok(SpannedValue::from_to_tokens(index_spec))
     }
 }
+
+impl PositionalValue for TableIndexSpec {}
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub enum SortOrder {
@@ -604,8 +623,12 @@ impl ToTokens for TableForeignKey {
     }
 }
 
-impl ParseMetaItem for TableForeignKey {
-    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+impl AttributeBase for TableForeignKey {
+    type Partial = Self;
+}
+
+impl AttributeValue for TableForeignKey {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
         let table: IdentOrStr = input.parse()?;
         let _: Token![=>] = input.parse()?;
         let paren_inner;
@@ -635,9 +658,11 @@ impl ParseMetaItem for TableForeignKey {
             }
         }
 
-        Ok(fk_spec)
+        Ok(SpannedValue::from_to_tokens(fk_spec))
     }
 }
+
+impl PositionalValue for TableForeignKey {}
 
 #[derive(Clone, Debug)]
 pub struct GeneratedColumnSpec {
@@ -660,13 +685,17 @@ impl ToTokens for GeneratedColumnSpec {
     }
 }
 
-impl ParseMetaItem for GeneratedColumnSpec {
-    fn parse_meta_item(input: ParseStream<'_>, _mode: ParseMode) -> Result<Self, Error> {
+impl AttributeBase for GeneratedColumnSpec {
+    type Partial = Self;
+}
+
+impl AttributeValue for GeneratedColumnSpec {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
         let mode: GeneratedColumnMode = input.parse()?;
         let _eq: Token![=] = input.parse()?;
         let expr: SqlExprStr = input.parse()?;
 
-        Ok(GeneratedColumnSpec { mode, expr })
+        Ok(SpannedValue::from_to_tokens(GeneratedColumnSpec { mode, expr }))
     }
 }
 
@@ -744,7 +773,7 @@ impl TryFrom<u8> for ParamPrefix {
     type Error = Error;
 
     fn try_from(byte: u8) -> Result<Self, Self::Error> {
-        char::from(byte).try_into()
+        <char as From<u8>>::from(byte).try_into()
     }
 }
 
@@ -778,9 +807,15 @@ impl Parse for ParamPrefix {
     }
 }
 
-impl ParseMetaItem for ParamPrefix {
-    fn parse_meta_item(stream: ParseStream<'_>, _: deluxe::ParseMode) -> Result<Self, Error> {
-        <ParamPrefix as Parse>::parse(stream)
+impl AttributeBase for ParamPrefix {
+    type Partial = Self;
+}
+
+impl AttributeValue for ParamPrefix {
+    fn parse_value(
+        input: ParseStream<'_>,
+    ) -> syn::Result<SpannedValue<Self::Partial>> {
+        <ParamPrefix as Parse>::parse(input).map(SpannedValue::from_to_tokens)
     }
 }
 
@@ -810,6 +845,15 @@ pub enum CaseConversion {
     TrainCase,
 }
 
+impl CaseConversion {
+    pub fn display<T>(self, value: T) -> CaseConversionDisplay<T> {
+        CaseConversionDisplay {
+            value,
+            conversion: self,
+        }
+    }
+}
+
 impl Parse for CaseConversion {
     fn parse(stream: ParseStream<'_>) -> Result<Self, Error> {
         let raw: IdentOrStr = stream.parse()?;
@@ -829,12 +873,20 @@ impl Parse for CaseConversion {
     }
 }
 
-impl CaseConversion {
-    pub fn display<T>(self, value: T) -> CaseConversionDisplay<T> {
-        CaseConversionDisplay {
+impl AttributeBase for CaseConversion {
+    type Partial = Self;
+}
+
+impl AttributeValue for CaseConversion {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
+        let start = input.span();
+        let value: CaseConversion = input.parse()?;
+        let end = input.span();
+
+        Ok(SpannedValue {
             value,
-            conversion: self,
-        }
+            span: start..end,
+        })
     }
 }
 
@@ -910,11 +962,22 @@ impl Parse for IdentOrStr {
     }
 }
 
-impl ParseMetaItem for IdentOrStr {
-    fn parse_meta_item(stream: ParseStream<'_>, _: deluxe::ParseMode) -> Result<Self, Error> {
-        <IdentOrStr as Parse>::parse(stream)
+impl AttributeBase for IdentOrStr {
+    type Partial = Self;
+}
+
+impl AttributeValue for IdentOrStr {
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
+        use syn::spanned::Spanned;
+
+        let value: IdentOrStr = input.parse()?;
+        let span = value.span();
+
+        Ok(SpannedValue::new(value, span))
     }
 }
+
+impl PositionalValue for IdentOrStr {}
 
 impl ToTokens for IdentOrStr {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
@@ -997,5 +1060,138 @@ impl ToTokens for ForeignKeyConflictAction {
         ts.extend(quote!{
             ::nanosql::table::ForeignKeyConflictAction::#variant_ident
         });
+    }
+}
+
+pub trait FlagExt {
+    fn is_set(&self) -> bool;
+}
+
+impl FlagExt for bool {
+    fn is_set(&self) -> bool {
+        *self
+    }
+}
+
+impl FlagExt for LitBool {
+    fn is_set(&self) -> bool {
+        self.value
+    }
+}
+
+impl FlagExt for FlagOrValue<LitBool> {
+    fn is_set(&self) -> bool {
+        match self {
+            FlagOrValue::None => false,
+            FlagOrValue::Flag => true,
+            FlagOrValue::Value(lit) => lit.value,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Any<T> {
+    inner: Vec<T>,
+    span: Span,
+}
+
+impl<T> Any<T> {
+    pub fn into_inner(self) -> Vec<T> {
+        self.inner
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl<T> Default for Any<T> {
+    fn default() -> Self {
+        Any {
+            inner: Vec::new(),
+            span: Span::call_site(),
+        }
+    }
+}
+
+impl<T> From<Vec<T>> for Any<T> {
+    fn from(inner: Vec<T>) -> Self {
+        Any {
+            inner,
+            span: Span::call_site(),
+        }
+    }
+}
+
+impl<T> Deref for Any<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_slice()
+    }
+}
+
+impl<T> IntoIterator for Any<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a Any<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
+impl<T> AttributeBase for Any<T> {
+    type Partial = Vec<T>;
+}
+
+impl<T> attribute_derive::from_partial::FromPartial<Vec<T>> for Any<T> {
+    fn from(partial: Vec<T>) -> syn::Result<Self> {
+        Ok(Any {
+            inner: partial,
+            span: Span::call_site(),
+        })
+    }
+
+    fn from_option(partial: Option<Vec<T>>, _error_missing: &str) -> syn::Result<Self> {
+        attribute_derive::from_partial::FromPartial::from(
+            partial.into_iter().flatten().collect::<Vec<_>>()
+        )
+    }
+
+    fn join(
+        first: Option<SpannedValue<Vec<T>>>,
+        second: SpannedValue<Vec<T>>,
+        _specified_twice_error: &str,
+    ) -> syn::Result<Option<SpannedValue<Vec<T>>>> {
+        if let Some(SpannedValue { mut value, span }) = first {
+            value.extend(second.value);
+            Ok(Some(SpannedValue::new(value, span.start..second.span.end)))
+        } else {
+            Ok(Some(second))
+        }
+    }
+}
+
+impl<T> AttributeValue for Any<T>
+where
+    T: AttributeValue,
+    Vec<T>: FromPartial<Partial<Vec<T::Partial>>>,
+{
+    fn parse_value(input: ParseStream) -> syn::Result<SpannedValue<Self::Partial>> {
+        let item = <T as AttributeValue>::parse_value(input)?;
+        let value = SpannedValue {
+            value: vec![FromPartial::from(item.value)?],
+            span: item.span,
+        };
+        Ok(value)
     }
 }

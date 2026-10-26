@@ -1,18 +1,18 @@
 use std::collections::{HashSet, HashMap};
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use syn::Error;
 use syn::{DeriveInput, Data, Fields, FieldsNamed, Type};
 use syn::ext::IdentExt;
 use quote::quote;
-use deluxe::SpannedValue;
+use attribute_derive::{FlagOrValue, FromAttr};
 use crate::util::{
-    ContainerAttributes, FieldAttributes, FieldAndColumn, IdentOrStr, TableIndexSpec, TableForeignKey,
+    ColumnIndexSpec, ContainerAttributes, FieldAndColumn, FieldAttributes, FlagExt, IdentOrStr, TableForeignKey, TableIndexSpec
 };
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
-    let attrs: ContainerAttributes = deluxe::parse_attributes(&input)?;
+    let attrs = ContainerAttributes::from_attributes(&input.attrs)?;
 
     match &input.data {
         Data::Struct(data) => {
@@ -58,7 +58,7 @@ fn expand_struct(
     let fields: Vec<_> = fields.named
         .iter()
         .map(|f| -> Result<_, Error> {
-            let field_attrs: FieldAttributes = deluxe::parse_attributes(f)?;
+            let field_attrs = FieldAttributes::from_attributes(&f.attrs)?;
             let field_name = f.ident.as_ref().ok_or_else(|| {
                 Error::new_spanned(f, "named field is unnamed?")
             })?;
@@ -69,7 +69,7 @@ fn expand_struct(
                     <_>::to_string,
                 );
 
-            let spec = if field_attrs.ignore {
+            let spec = if field_attrs.ignore.is_set() {
                 None
             } else {
                 Some(FieldAndColumn {
@@ -97,7 +97,7 @@ fn expand_struct(
     let primary_key = fields
         .iter()
         .map(|f| {
-            f.attributes.primary_key.then_some(quote!(.primary_key()))
+            f.attributes.primary_key.is_set().then_some(quote!(.primary_key()))
         });
 
     let foreign_key = fields
@@ -106,18 +106,22 @@ fn expand_struct(
 
     let index_specs = fields
         .iter()
-        .map(|f| &f.attributes.index);
+        .map(|f| match &f.attributes.index {
+            FlagOrValue::None => None,
+            FlagOrValue::Flag => Some(ColumnIndexSpec::default()),
+            FlagOrValue::Value(spec) => Some(spec.clone()),
+        });
 
     let uniq_constraint = fields
         .iter()
         .map(|f| {
-            f.attributes.unique.then_some(quote!(.unique()))
+            f.attributes.unique.is_set().then_some(quote!(.unique()))
         });
 
     let check_constraint = fields
         .iter()
         .map(|f| {
-            let constraints = f.attributes.check.as_slice();
+            let constraints = &f.attributes.check;
 
             quote!{
                 #(.check(#constraints))*
@@ -193,14 +197,14 @@ fn expand_struct(
 }
 
 fn validate_primary_key(
-    table_pk_cols: Option<&SpannedValue<Vec<IdentOrStr>>>,
+    table_pk_cols: Option<&Vec<IdentOrStr>>,
     fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
     // if the table-level PK is declared, check it
     if let Some(table_pk_cols) = table_pk_cols {
         // ensure that there is at least 1 column in the PK
         if table_pk_cols.is_empty() {
-            return Err(Error::new_spanned(table_pk_cols, "primary key may not be an empty tuple"));
+            return Err(Error::new(Span::call_site(), "primary key may not be an empty tuple"));
         }
 
         // ensure that columns referenced in the table-level PK do in fact exist
@@ -226,13 +230,13 @@ fn validate_primary_key(
     // always check the field-level PK attributes
     let mut column_pk_iter = fields
         .iter()
-        .filter_map(|f| f.attributes.primary_key.then_some(&f.attributes));
+        .filter(|f| f.attributes.primary_key.is_set());
 
     if let Some(column_pk) = column_pk_iter.next() {
         // ensure that a column-level PK does not conflict with the table-level PK
         if table_pk_cols.is_some() {
             return Err(Error::new_spanned(
-                column_pk.primary_key,
+                column_pk.field.clone(),
                 "primary key declared at both the table and the column level"
             ));
         }
@@ -240,7 +244,7 @@ fn validate_primary_key(
         // ensure that at most one column is marked as the PK
         if let Some(dup_pk) = column_pk_iter.next() {
             return Err(Error::new_spanned(
-                dup_pk.primary_key,
+                dup_pk.field.clone(),
                 "more than one primary key column; use the table-level attribute instead"
             ));
         }
@@ -355,7 +359,7 @@ fn validate_one_index(
 }
 
 fn validate_unique_constraints(
-    unique_cols: &[SpannedValue<Vec<IdentOrStr>>],
+    unique_cols: &[Vec<IdentOrStr>],
     fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
     unique_cols
@@ -364,13 +368,13 @@ fn validate_unique_constraints(
 }
 
 fn validate_one_unique_constraint(
-    unique_cols: &SpannedValue<Vec<IdentOrStr>>,
+    unique_cols: &[IdentOrStr],
     fields: &[FieldAndColumn],
 ) -> Result<(), Error> {
     // ensure that the foreign key spec contains at least 1 column
     if unique_cols.is_empty() {
-        return Err(Error::new_spanned(
-            unique_cols,
+        return Err(Error::new(
+            Span::call_site(),
             "unique constraint must refer to at least 1 column"
         ));
     }
@@ -388,7 +392,7 @@ fn validate_one_unique_constraint(
 
     // ensure that the referenced columns are unique
     let mut column_set = HashSet::new();
-    for col in unique_cols.as_slice() {
+    for col in unique_cols {
         if !column_set.insert(col) {
             return Err(Error::new_spanned(col, "duplicate columns in unique constraint"));
         }
@@ -403,11 +407,11 @@ fn primary_key_type(
 ) -> Result<TokenStream, Error> {
     let col_pk = fields
         .iter()
-        .find(|f| SpannedValue::into_inner(f.attributes.primary_key));
+        .find(|f| f.attributes.primary_key.is_set());
 
     // If the PK type is explicitly specified, simply return it verbatim.
     // Check that the table _actually_ has a PK; disallow if it doesn't.
-    if let Some(pk_ty) = container_attrs.primary_key_ty.as_ref() {
+    if let Some(pk_ty) = container_attrs.pk_ty.as_ref() {
         if container_attrs.primary_key.is_some() || col_pk.is_some() {
             return Ok(quote!(#pk_ty));
         } else {

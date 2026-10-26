@@ -99,7 +99,7 @@ struct FromSqlMultiFieldTuple (
 );
 
 #[derive(Table)]
-#[nanosql(pk = [pk_field_1, pk_field_2])]
+#[nanosql(primary_key = [pk_field_1, pk_field_2])]
 //~^ ERROR unknown column `pk_field_2` in primary key
 struct TableLevelPkOnIgnored {
     pk_field_1: u32,
@@ -109,10 +109,10 @@ struct TableLevelPkOnIgnored {
 }
 
 #[derive(Table)]
-#[nanosql(fk(OtherTable => (connection_1 = pk_1, connection_2 = pk_2)))]
+#[nanosql(foreign_key(OtherTable => (connection_1 = pk_1, connection_2 = pk_2)))]
 //~^ ERROR unknown column `connection_1` in foreign key
 struct TableLevelFkOnIgnored {
-    #[nanosql(skip)]
+    #[nanosql(ignore)]
     connection_1: Option<Box<str>>,
     value: Option<i64>,
     connection_2: Option<[u8; 32]>,
@@ -134,7 +134,7 @@ struct TableLevelIndexOnIgnored {
 //~^ ERROR Explicit PK type given to table without a PK
 struct PkTypeOnIgnoredPk {
     #[nanosql(primary_key)]
-    #[nanosql(skip)]
+    #[nanosql(ignore)]
     key: String,
     value: f64,
 }

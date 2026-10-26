@@ -25,7 +25,7 @@ use {
 /// #[derive(Clone, Debug, Table, Param, ResultRecord)]
 /// #[nanosql(rename = test_table)]
 /// struct TestTable {
-///     #[nanosql(pk)]
+///     #[nanosql(primary_key)]
 ///     id: u32,
 ///     #[nanosql(unique)]
 ///     name: String,
@@ -147,7 +147,7 @@ impl ResultRecord for VdbeInstruction {
 /// #[derive(Clone, Debug, Table, Param, ResultRecord)]
 /// #[nanosql(rename = test_table)]
 /// struct TestTable {
-///     #[nanosql(pk)]
+///     #[nanosql(primary_key)]
 ///     id: u32,
 ///     #[nanosql(unique)]
 ///     name: String,

@@ -52,8 +52,7 @@ struct IgnoredParamLastUnnamed(f64, #[nanosql(ignore)] DoesNotImplementDefaultOr
 #[derive(Clone, Debug, Param)]
 struct IgnoredParamManyUnnamed<'p>(
     &'p str,
-    // test the `skip` alias as well
-    #[nanosql(skip)] DoesNotImplementDefaultOrToSqlOrParam,
+    #[nanosql(ignore)] DoesNotImplementDefaultOrToSqlOrParam,
     #[nanosql(ignore)] Cow<'static, str>,
     u16,
 );
@@ -73,7 +72,7 @@ struct IgnoredResultRecordManyNamed {
     power_draw: usize,
     #[nanosql(ignore)]
     ignore_middle_1: Option<u64>,
-    #[nanosql(skip)]
+    #[nanosql(ignore)]
     power_draw_watt: NotFromSqlButDefault, // tricky potential name collision
     #[nanosql(rename = "brand")]
     label: Rc<str>,
@@ -548,17 +547,17 @@ struct TableWithIgnore {
     favorite_color: Option<String>,
     #[nanosql(ignore)]
     non_persistent_state: Vec<DoesNotImplementDefaultOrToSqlOrParam>,
-    #[nanosql(skip)]
+    #[nanosql(ignore)]
     defaulted_stuff: NotFromSqlButDefault,
-    #[nanosql(pk)] // PRIMARY KEY after ignored fields, to shake things up
+    #[nanosql(primary_key)] // PRIMARY KEY after ignored fields, to shake things up
     id: u64,
-    #[nanosql(fk = OtherTable::uniq_id)]
+    #[nanosql(foreign_key = OtherTable::uniq_id)]
     more_at_the_end: u16,
 }
 
 #[derive(PartialEq, Debug, Table, Param, ResultRecord)]
 struct OtherTable {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     uniq_id: u16,
     value: Vec<u8>,
 }

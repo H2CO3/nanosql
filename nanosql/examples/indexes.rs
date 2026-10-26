@@ -4,7 +4,7 @@ use nanosql::table::{SortOrder, TableIndexSpec};
 
 /// This table has a column-level index which is partial.
 #[derive(Clone, Debug, Param, Table, ResultRecord)]
-#[nanosql(pk = [id])]
+#[nanosql(primary_key = [id])]
 struct Author {
     id: i32,
     #[nanosql(index(desc, where = "name IS NOT NULL"))]
@@ -15,7 +15,7 @@ struct Author {
 /// and unique as well. Many general indexes can co-exist (unlike the PRIMARY KEY).
 #[derive(Clone, Debug, Param, Table, ResultRecord)]
 struct Publication {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     id: i64,
     #[nanosql(index(unique, asc))]
     isbn: String,
@@ -40,9 +40,9 @@ struct Publication {
     )
 )]
 struct WrittenBy {
-    #[nanosql(fk = Author::id)]
+    #[nanosql(foreign_key = Author::id)]
     author_id: Option<i32>,
-    #[nanosql(fk = Publication::id)]
+    #[nanosql(foreign_key = Publication::id)]
     publication_id: i64,
     #[nanosql(index(unique = false, desc))]
     timestamp: f64,

@@ -5,7 +5,7 @@ use nanosql::{Table, Param, ResultRecord, Connection, ConnectionExt, Single};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Table, Param, ResultRecord)]
 struct Fruit {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     name: String,
     color: String,
     energy: u32,

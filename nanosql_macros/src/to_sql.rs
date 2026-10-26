@@ -4,12 +4,13 @@ use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields};
 use syn::parse_quote;
 use syn::ext::IdentExt;
 use quote::quote;
-use crate::util::{add_bounds, ContainerAttributes, FieldAttributes};
+use attribute_derive::FromAttr;
+use crate::util::{ContainerAttributes, FieldAttributes, FlagExt, add_bounds};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
-    let attrs: ContainerAttributes = deluxe::parse_attributes(&input)?;
+    let attrs = ContainerAttributes::from_attributes(&input.attrs)?;
 
     match &input.data {
         Data::Struct(data) => expand_struct(&input, attrs, data),
@@ -40,8 +41,8 @@ fn expand_struct(
         .iter()
         .enumerate()
         .map(|(idx, field)| -> Result<_, Error> {
-            let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
-            Ok(if attrs.ignore { None } else { Some((idx, field)) })
+            let attrs = FieldAttributes::from_attributes(&field.attrs)?;
+            Ok(if attrs.ignore.is_set() { None } else { Some((idx, field)) })
         })
         .filter_map(Result::transpose);
 
@@ -92,7 +93,7 @@ fn expand_enum(
     let variant_strings: Vec<_> = data.variants
         .iter()
         .map(|v| {
-            let var_attrs: FieldAttributes = deluxe::parse_attributes(v)?;
+            let var_attrs = FieldAttributes::from_attributes(&v.attrs)?;
             let var_name = var_attrs.rename
                 .as_ref()
                 .map_or_else(

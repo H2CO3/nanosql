@@ -38,7 +38,7 @@ struct MusicalInstrumentInsertParams<'make_lt> {
 
 #[derive(Clone, Debug, Table, Param, ResultRecord)]
 struct Orchestra {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     id: i16,
     name: String,
     #[nanosql(check = "1000 <= founded", check = "founded <= 9999")]
@@ -46,7 +46,7 @@ struct Orchestra {
 }
 
 #[derive(Clone, Debug, Table, Param, ResultRecord)]
-#[nanosql(pk = ["section", "other_name"])]
+#[nanosql(primary_key = ["section", "other_name"])]
 struct Hierarchy {
     section: Box<str>,
     /// the `primary_key` directive must respect the `rename` attribute
@@ -60,7 +60,7 @@ struct Hierarchy {
 /// This is a table that intentionally does not declare any `PRIMARY KEY`.
 #[derive(Table, Param)]
 struct TableWithoutPK {
-    /// intentionally misleading name: this field is **NOT** marked as `#[nanosql(pk)]`.
+    /// intentionally misleading name: this field is **NOT** marked as `#[nanosql(primary_key)]`.
     pk: String,
     /// this would make a fine `PRIMARY KEY`, but alas, it isn't.
     some_other_field: i64,
@@ -68,7 +68,7 @@ struct TableWithoutPK {
 
 /// This table demonstrates the correct use of a custom `PRIMARY KEY` type.
 #[derive(Clone, PartialEq, Debug, Table, Param, ResultRecord)]
-#[nanosql(pk = [pk_first, pk_second])]
+#[nanosql(primary_key = [pk_first, pk_second])]
 #[nanosql(input_lt = 'input, pk_ty = CorrectCustomPK<'input>)]
 struct TableWithCorrectCustomPK {
     unused: String,
@@ -91,7 +91,7 @@ struct CorrectCustomPK<'a> {
 /// This table demonstrates an **incorrect** custom PK type: one where the
 /// field names of the custom type do not match the column names of the PK.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Table, Param, ResultRecord)]
-#[nanosql(pk = [field_abc, field_xyz], pk_ty = BadCustomPK)]
+#[nanosql(primary_key = [field_abc, field_xyz], pk_ty = BadCustomPK)]
 struct TableWithBadCustomPK {
     field_abc: u32,
     field_xyz: u64,

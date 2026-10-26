@@ -5,12 +5,13 @@ use syn::parse_quote;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
 use quote::quote;
-use crate::util::{add_bounds, ContainerAttributes, FieldAttributes, ParamPrefix};
+use attribute_derive::FromAttr;
+use crate::util::{ContainerAttributes, FieldAttributes, FlagExt, ParamPrefix, add_bounds};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
-    let attrs: ContainerAttributes = deluxe::parse_attributes(&input)?;
+    let attrs = ContainerAttributes::from_attributes(&input.attrs)?;
 
     match &input.data {
         Data::Struct(data) => expand_struct(&input, attrs, data),
@@ -81,12 +82,12 @@ fn expand_named_fields(
     let body = fields.named
         .iter()
         .map(|field| {
-            let field_attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+            let field_attrs = FieldAttributes::from_attributes(&field.attrs)?;
             let field_name = field.ident.as_ref().ok_or_else(|| {
                 Error::new_spanned(field, "named field has no name")
             })?;
 
-            if field_attrs.ignore {
+            if field_attrs.ignore.is_set() {
                 return Ok(None);
             }
 
@@ -136,9 +137,13 @@ fn expand_unnamed_fields(
         .iter()
         .enumerate() // this call to enumerate counts fields...
         .map(|(idx, field)| -> Result<_, Error> {
-            let field_attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+            let field_attrs = FieldAttributes::from_attributes(&field.attrs)?;
 
-            Ok(if field_attrs.ignore { None } else { Some((idx, field)) })
+            Ok(if field_attrs.ignore.is_set() {
+                None
+            } else {
+                Some((idx, field))
+            })
         })
         .filter_map(Result::transpose)
         .zip(1_usize..) // ...while this one counts (1-based) parameters

@@ -5,27 +5,31 @@ use nanosql::{Param, ResultRecord, Table, table::{CreateTable, TableConstraint}}
 /// The good ol' boring example of employees and departments in a company.
 #[derive(Clone, Debug, Param, ResultRecord, Table)]
 struct Department {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     department_id: i64,
     title: String,
     established_year: u16,
 }
 
 #[derive(Clone, Debug, Param, ResultRecord, Table)]
-#[nanosql(fk("bogus_table" => ("some_fk_2" = "some_col", "some_fk_1" = "other_col"), on_update = set_null, on_delete = set_default))]
+#[nanosql(
+    foreign_key(
+        "bogus_table" => ("some_fk_2" = "some_col", "some_fk_1" = "other_col"),
+        on_update = set_null,
+        on_delete = set_default,
+    )
+)]
 struct Employee {
-    #[nanosql(pk)]
+    #[nanosql(primary_key)]
     employee_id: i64,
     full_name: String,
     /// The general director has no boss (its boss ID is NULL).
     ///
-    /// The `foreign_key` attribute has an alias `fk` too.
-    ///
     /// For consistency with table-level FKs, you can specify an FK
-    /// either as `fk(foreign_table => foreign_column)`, ...
-    #[nanosql(fk("Employee" => "employee_id", on_delete = cascade, on_update = restrict))]
+    /// either as `foreign_key(foreign_table => foreign_column)`, ...
+    #[nanosql(foreign_key("Employee" => "employee_id", on_delete = cascade, on_update = restrict))]
     boss_employee_id: Option<i64>,
-    /// or as a Rust path, like `fk = foreign_table::foreign_column`.
+    /// or as a Rust path, like `foreign_key = foreign_table::foreign_column`.
     /// Both syntaxes have the same meaning. Instead of identifiers,
     /// you can use string literals if your table or column name is
     /// not a valid Rust identifier. The string literal syntax works
@@ -43,7 +47,7 @@ struct Employee {
 }
 
 #[derive(Clone, Debug, Param, ResultRecord, Table)]
-#[nanosql(pk = [some_col, other_col], rename = bogus_table)]
+#[nanosql(primary_key = [some_col, other_col], rename = bogus_table)]
 struct BogusTable {
     some_col: bool,
     other_col: u32,

@@ -3,12 +3,13 @@ use syn::{Error, WhereClause};
 use syn::{DeriveInput, Data, DataStruct, DataEnum, Fields, FieldsNamed, FieldsUnnamed};
 use syn::parse_quote;
 use quote::quote;
-use crate::util::{add_bounds, ContainerAttributes, FieldAttributes};
+use attribute_derive::FromAttr;
+use crate::util::{ContainerAttributes, FieldAttributes, FlagExt, add_bounds};
 
 
 pub fn expand(ts: TokenStream) -> Result<TokenStream, Error> {
     let input: DeriveInput = syn::parse2(ts)?;
-    let attrs: ContainerAttributes = deluxe::parse_attributes(&input)?;
+    let attrs = ContainerAttributes::from_attributes(&input.attrs)?;
 
     match &input.data {
         Data::Struct(data) => expand_struct(&input, attrs, data),
@@ -65,14 +66,14 @@ fn expand_named_fields(
     let mut num_columns = 0;
 
     for field in &fields.named {
-        let field_attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+        let field_attrs = FieldAttributes::from_attributes(&field.attrs)?;
         let field_name = field.ident.as_ref().ok_or_else(|| {
             Error::new_spanned(field, "named field has no name")
         })?;
 
         field_names.push(field_name);
 
-        if field_attrs.ignore {
+        if field_attrs.ignore.is_set() {
             field_ctors.push(quote!(::core::default::Default::default()));
         } else {
             // If the field name is a raw identifier, still only use the non-raw
@@ -108,15 +109,15 @@ fn expand_unnamed_fields(
     let mut idx = 0; // columns are 0-indexed
 
     for field in &fields.unnamed {
-        let attrs: FieldAttributes = deluxe::parse_attributes(field)?;
+        let attrs = FieldAttributes::from_attributes(&field.attrs)?;
 
-        field_ctors.push(if attrs.ignore {
+        field_ctors.push(if attrs.ignore.is_set() {
             quote!(::core::default::Default::default())
         } else {
             quote!(row.get(#idx)?)
         });
 
-        idx += usize::from(!attrs.ignore);
+        idx += usize::from(!attrs.ignore.is_set());
     }
 
     let ts = quote!{

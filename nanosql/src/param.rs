@@ -119,6 +119,9 @@ impl FromStr for ParamPrefix {
 /// When derived on a `struct`, the `rename_all` (type-level), `rename` and
 /// `ignore` (field-level) attributes work identically to those of
 /// [`Table`](crate::table::Table); see its documentation for more details.
+///
+/// The `param_prefix` attribute, if present, sets the `PREFIX` associated constant.
+/// If omitted, the derive macro defaults this parameter prefix to `$`.
 pub trait Param {
     /// The leading symbol in parameter names. (Must be consistent across parameters.)
     const PREFIX: ParamPrefix;
